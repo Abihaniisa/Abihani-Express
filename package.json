@@ -7,6 +7,7 @@
     "test": "npx playwright test",
     "test:headed": "npx playwright test --headed",
     "test:ui": "npx playwright test --ui",
+    "build": "node build.js",
     "serve": "npx serve -l 3000 -s ."
   },
   "repository": {
