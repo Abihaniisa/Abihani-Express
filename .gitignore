@@ -1,0 +1,15 @@
+# Environment variables
+.env
+js/env.js
+
+# Dependencies
+node_modules/
+
+# Database setup
+supabase-setup.sql
+
+# Test results
+test-results/
+
+# Playwright
+playwright-report/
