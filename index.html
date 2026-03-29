@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>if(localStorage.getItem('theme')==='dark')document.addEventListener('DOMContentLoaded',function(){document.body.classList.add('dark-mode')})</script>
+    <title>Abihani Express · Leather Works</title>
+    <!-- Font Awesome Icons (CDN) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Supabase Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- App Styles -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="app-header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <h1>Abihani Express</h1>
+                    <span>MOM · DAD · UMMIHANI</span>
+                </div>
+                <nav class="desktop-nav">
+                    <a href="#" onclick="window.showPage('home'); return false;">Home</a>
+                    <a href="#" onclick="window.showPage('all-products'); return false;">Shop</a>
+                    <a href="#" onclick="window.showPage('search'); return false;">Search</a>
+                    <a href="#" onclick="window.showPage('about'); return false;">About</a>
+                    <a href="#" onclick="window.showPage('contact'); return false;">Contact</a>
+                </nav>
+                <div class="header-icons">
+                    <i class="fas fa-search" onclick="window.showPage('search')"></i>
+                    <i class="fas fa-shopping-bag"></i>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- HOMEPAGE -->
+        <div id="home-page" class="page-section active-page">
+            <div class="slider-container" id="slider-container"></div>
+
+            <div class="action-row">
+                <button class="btn-primary" onclick="window.showPage('all-products')"><i class="fas fa-store"></i> Explore</button>
+                <button class="btn-secondary" onclick="window.showUnavailable()"><i class="fas fa-user-plus"></i> Register</button>
+            </div>
+
+            <div class="section-title">
+                <h3>Categories</h3>
+                <a href="#" onclick="window.showPage('all-products'); return false;">See all</a>
+            </div>
+            <div class="category-scroll" id="categories-home"></div>
+
+            <div class="section-title">
+                <h3>⭐ Featured Products</h3>
+                <a href="#" onclick="window.showPage('all-products'); return false;">See all</a>
+            </div>
+            <div class="product-scroll" id="featured-products"></div>
+
+            <div id="info-sections"></div>
+        </div>
+
+        <!-- ALL PRODUCTS PAGE -->
+        <div id="products-page" class="page-section">
+            <div class="section-title">
+                <h3>All Products</h3>
+                <i class="fas fa-sliders-h" style="color: var(--accent);"></i>
+            </div>
+            <div class="category-scroll" id="categories-filter"></div>
+            <div class="product-grid" id="all-products-grid"></div>
+        </div>
+
+        <!-- PRODUCT DETAIL PAGE -->
+        <div id="product-detail-page" class="page-section">
+            <div id="product-detail-container"></div>
+        </div>
+
+        <!-- SEARCH PAGE -->
+        <div id="search-page" class="page-section">
+            <div class="search-box" style="margin: 20px 0;">
+                <input type="text" id="search-input" placeholder="Search by name or price..." class="admin-input" style="border-radius: 60px;" onkeyup="window.searchProducts()" aria-label="Search products">
+            </div>
+            <div id="search-results" class="product-grid"></div>
+        </div>
+
+        <!-- ADMIN LOGIN PAGE -->
+        <div id="admin-login-page" class="page-section">
+            <div class="admin-login-box">
+                <h2 style="text-align: center; margin-bottom: 24px;">🔐 Admin Portal</h2>
+                <input type="email" id="admin-email" placeholder="Email" class="admin-input" aria-label="Admin email">
+                <input type="password" id="admin-password" placeholder="Password" class="admin-input" aria-label="Admin password">
+                <button class="btn-primary" style="width: 100%;" onclick="window.adminLogin()">Log In</button>
+                <p style="text-align: center; margin-top: 20px; font-size: 13px;">Want to become a Vendor? Create an account</p>
+            </div>
+        </div>
+
+        <!-- ADMIN DASHBOARD -->
+        <div id="admin-dashboard-page" class="page-section">
+            <div style="display: flex; justify-content: space-between; margin: 20px 0;">
+                <h3>👑 Admin Dashboard</h3>
+                <button class="btn-secondary" style="padding: 8px 16px;" onclick="window.logoutAdmin()">Logout</button>
+            </div>
+
+            <div class="admin-card">
+                <div style="display: flex; justify-content: space-between;">
+                    <h4><i class="fas fa-folder"></i> Categories</h4>
+                    <i class="fas fa-plus-circle" style="color: var(--accent); font-size: 24px;" onclick="window.showAddCategory()"></i>
+                </div>
+                <div id="admin-categories-list"></div>
+            </div>
+
+            <div class="admin-card">
+                <div style="display: flex; justify-content: space-between;">
+                    <h4><i class="fas fa-folder-open"></i> Subcategories</h4>
+                    <i class="fas fa-plus-circle" style="color: var(--accent); font-size: 24px;" onclick="window.showAddSubcategory()"></i>
+                </div>
+                <div id="admin-subcategories-list"></div>
+            </div>
+
+            <div class="admin-card">
+                <div style="display: flex; justify-content: space-between;">
+                    <h4><i class="fas fa-tag"></i> Products</h4>
+                    <i class="fas fa-plus-circle" style="color: var(--accent); font-size: 24px;" onclick="window.showAddProduct()"></i>
+                </div>
+                <div id="admin-products-list"></div>
+            </div>
+        </div>
+
+        <!-- ABOUT PAGE -->
+        <div id="about-page" class="page-section">
+            <div class="info-card" style="margin-top: 20px;">
+                <h4>Who We Are</h4>
+                <p>Abihani Express is the premier online destination for premium leather goods in Yobe State, Nigeria. We specialize in handcrafted leather shoes, bags, and accessories that combine traditional craftsmanship with modern style.</p>
+            </div>
+            <div class="info-card">
+                <h4>Our Mission</h4>
+                <p>To provide affordable, durable, and stylish leather products while supporting local artisans and growing the community economy.</p>
+            </div>
+            <div class="info-card">
+                <h4>Meet Abihani Isa</h4>
+                <p>A young entrepreneur with big dreams, Abihani Isa started this journey to bring quality leather products to his community. He's also a published author, with a novel chronicling his journey of love with Ummihani.</p>
+            </div>
+        </div>
+
+        <!-- TERMS PAGE -->
+        <div id="terms-page" class="page-section">
+            <div class="admin-card">
+                <h4>Terms & Conditions</h4>
+                <p style="margin-top: 12px;">1. By using this platform, you agree to these terms.<br>2. Vendors are responsible for their listings.<br>3. Transactions are between buyer and vendor.<br>4. Prices subject to change.<br>5. Prohibited items not allowed.</p>
+            </div>
+        </div>
+
+        <!-- PRIVACY PAGE -->
+        <div id="privacy-page" class="page-section">
+            <div class="admin-card">
+                <h4>Privacy Policy</h4>
+                <p style="margin-top: 12px;">We collect name, email, and usage data to improve service. We do not sell your data. Information shared with vendors for transactions only.</p>
+            </div>
+        </div>
+
+        <!-- CONTACT PAGE -->
+        <div id="contact-page" class="page-section">
+            <h3>📬 Contact & Feedback</h3>
+            <div class="admin-card">
+                <input type="text" id="contact-name" placeholder="Your name (optional)" class="admin-input" aria-label="Your name">
+                <input type="email" id="contact-email" placeholder="your@email.com (optional)" class="admin-input" aria-label="Email address">
+                <textarea id="contact-message" placeholder="Your message..." class="admin-input" style="border-radius: 24px; height: 100px;" aria-label="Your message"></textarea>
+                <button class="btn-primary" style="width: 100%;" onclick="window.submitFeedback()">Send feedback</button>
+            </div>
+            <div class="social-icons" id="social-links"></div>
+        </div>
+
+        <!-- PROFILE PAGE -->
+        <div id="profile-page" class="page-section">
+            <div class="feature-unavailable">
+                <i class="fas fa-lock" style="font-size: 48px; color: var(--accent); margin-bottom: 16px;"></i>
+                <h4>Feature not available</h4>
+                <p style="margin: 16px 0;">This feature is not yet available for non-admin users. Please contact CEO | Abihani Nig Ltd.</p>
+                <button class="btn-primary" style="width: auto; padding: 12px 24px;" onclick="window.showPage('contact')">📞 Contact CEO</button>
+            </div>
+        </div>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="app-footer">
+        <div class="container">
+            <div class="footer-row">
+                <div class="footer-brand" id="footer-brand">
+                    <h4>Abihani Express</h4>
+                    <p>Buy for Mom. Dad. Ummihani. 🎉</p>
+                </div>
+                <div class="footer-links">
+                    <a href="#" onclick="window.showPage('about'); return false;">About</a>
+                    <a href="#" onclick="window.showPage('terms'); return false;">Terms</a>
+                    <a href="#" onclick="window.showPage('privacy'); return false;">Privacy</a>
+                </div>
+
+                <div class="theme-toggle" onclick="window.toggleTheme()">
+                    <i class="fas fa-sun"></i>
+                    <i class="fas fa-moon"></i>
+                    <span class="toggle-knob"></span>
+                </div>
+
+                <div class="contact-copyright">
+                    <button class="contact-btn" onclick="window.showPage('contact')"><i class="fas fa-comment"></i> Contact & Feedback</button>
+                    <span id="copyright">© 2026 Abihani Express</span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- ADMIN MODAL -->
+    <div class="modal-overlay" id="admin-modal">
+        <div class="modal-content" id="admin-modal-content"></div>
+    </div>
+
+    <!-- TOAST NOTIFICATIONS -->
+    <div id="toast-container"></div>
+
+    <!-- BOTTOM NAVIGATION -->
+    <div class="bottom-nav">
+        <button class="nav-item active" onclick="window.showPage('home')" id="nav-home"><i class="fas fa-home"></i><span>Home</span></button>
+        <button class="nav-item" onclick="window.showPage('all-products')" id="nav-shop"><i class="fas fa-th-large"></i><span>Shop</span></button>
+        <button class="nav-item" onclick="window.showPage('search')" id="nav-search"><i class="fas fa-search"></i><span>Search</span></button>
+        <button class="nav-item" onclick="window.showPage('profile')" id="nav-profile"><i class="fas fa-user"></i><span>Profile</span></button>
+    </div>
+
+    <!-- App Scripts (order matters: env first, then config, then modules, then app entry point) -->
+    <script src="js/env.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/render.js"></script>
+    <script src="js/navigation.js"></script>
+    <script src="js/admin.js"></script>
+    <script src="js/search.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

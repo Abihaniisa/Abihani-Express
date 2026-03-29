@@ -1,0 +1,28 @@
+{
+  "name": "abihani-express",
+  "version": "1.0.0",
+  "description": "Online store for shopping leather works",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "test:ui": "npx playwright test --ui",
+    "serve": "npx serve -l 3000 -s ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Abihaniisa/Abihani-Express.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Abihaniisa/Abihani-Express/issues"
+  },
+  "homepage": "https://github.com/Abihaniisa/Abihani-Express#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "serve": "^14.2.6"
+  }
+}
