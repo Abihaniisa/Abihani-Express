@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(js|html|json\\)$\")",
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Bash(npx playwright:*)",
+      "Bash(node -e \":*)",
+      "Bash(node:*)",
+      "Bash(find C:UsersdellAbihani-Express -type f -name *.js)"
+    ]
+  }
+}
