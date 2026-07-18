@@ -43,6 +43,16 @@ function showToast(msg, type) {
 // ============ INIT ============
 (function init() {
     var path = window.location.pathname.replace(/\//g, '') || 'home';
+// --- FIX START: handle product-detail query params on direct load ---
+if (path === 'product-detail') {
+    var params = new URLSearchParams(window.location.search);
+    var id = params.get('id');
+    if (id) {
+        // Call immediately after DOM is ready, but ensure init finishes first.
+        setTimeout(function() { showProductDetail(id, 'shop'); }, 100);
+    }
+}
+// --- FIX END ---
     if (path === 'index.html') path = 'home';
     pageHistoryStack = [path];
     history.replaceState({ page: path, isAppPage: true }, '', '/' + (path === 'home' ? '' : path));
