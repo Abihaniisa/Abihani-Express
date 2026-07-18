@@ -11,7 +11,6 @@ var currentDetailImages = [], currentDetailIndex = 0, detailSource = 'shop';
 var maintenanceModeActive = CONFIG.MAINTENANCE_MODE_ENABLED || false;
 var currentDetailProduct = null, deferredPWA = null, haniTourActive = false, haniTourStep = 0;
 var haniIdleTimer, inactivityTimer;
-var pendingDetailId = null;
 
 // ============ EMAIL SENDER (VIA API ROUTE) ============
 async function sendEmail(to, subject, html) {
@@ -45,12 +44,8 @@ function showToast(msg, type) {
 (function init() {
     var path = window.location.pathname.replace(/\//g, '') || 'home';
     if (path === 'index.html') path = 'home';
-    if (path === 'product-detail') {
-        var urlParams = new URLSearchParams(window.location.search);
-        pendingDetailId = urlParams.get('id');
-    }
     pageHistoryStack = [path];
-    history.replaceState({ page: path, isAppPage: true }, '', '/' + (path === 'home' ? '' : path) + window.location.search);
+    history.replaceState({ page: path, isAppPage: true }, '', '/' + (path === 'home' ? '' : path));
     checkSession();
 })();
 
@@ -258,12 +253,7 @@ async function loadDynamicData() {
     if (mockDataActive) mergeMockData();
     updateCategoriesHome(); updateShopCategories(); updateFeaturedProducts();
     var ag = document.getElementById('all-products-grid'); if (ag) renderAllProducts();
-    if (pendingDetailId) {
-        var pid = pendingDetailId; pendingDetailId = null;
-        var found = allProducts.find(function(x) { return x.id == pid; });
-        if (found) { showProductDetail(pid, 'shop'); }
-        else { showToast('Product not found', 'error'); }
-    }
+    return allProducts;
 }
 
 // ============ MOCK DATA (KEPT FOR PUBLIC DISPLAY) ============
@@ -367,7 +357,6 @@ function navigateTo(pageName, addToHistory) {
 function pushToHistory(page) {
     pageHistoryStack.push(page);
     var url = '/' + (page === 'home' ? '' : page);
-    if (page === 'product-detail' && currentDetailProduct) url += '?id=' + currentDetailProduct.id;
     history.pushState({ page: page, isAppPage: true }, '', url);
 }
 function goBackSmart() {
@@ -410,15 +399,10 @@ window.addEventListener('popstate', function(e) {
     pageHistoryStack = pageHistoryStack.filter(function(p) { return p !== path; });
     pageHistoryStack.push(path);
     if (validAppPages.indexOf(path) === -1) { navigateTo('home', false); return; }
-    if (path === 'product-detail') {
-        var urlParams = new URLSearchParams(window.location.search);
-        var pid = urlParams.get('id');
-        if (pid && allProducts.length) { showProductDetail(pid, detailSource || 'shop'); }
-        else { navigateTo('shop', false); }
-    } else showPage(path);
+    if (path === 'product-detail') { navigateTo('shop', false); } else showPage(path);
 });
 var initPath = window.location.pathname.replace(/\//g, '') || 'home';
-(function() { pageHistoryStack = [initPath]; showPage(initPath === 'product-detail' ? 'shop' : initPath); })();
+(function() { pageHistoryStack = [initPath]; showPage(initPath); })();
 
 // ============ DOM EVENTS ============
 document.addEventListener('DOMContentLoaded', function() {
@@ -470,6 +454,12 @@ function renderAllProducts() {
 
 // ============ PRODUCT DETAIL ============
 function showProductDetail(id, source) {
+    if (allProducts.length === 0) {
+        loadDynamicData().then(function() {
+            showProductDetail(id, source);
+        });
+        return;
+    }
     if (source) detailSource = source;
     var p = allProducts.find(function(x) { return x.id == id; }); if (!p) return;
     currentDetailProduct = p;
@@ -1058,4 +1048,152 @@ async function saveEditProduct(id) {
 }
 async function deleteProductConfirm(id, name) {
     if (!confirm('Delete "' + name + '" permanently?')) return;
-    await supabase.from('product
+    await supabase.from('products').delete().eq('id', id);
+    closeAdminModal(); showToast('Product deleted', 'success'); renderAdminPanels();
+}
+
+// ============ CATEGORY CRUD ============
+function showAddCategoryForm() { var html = '<h3>➕ Add Category</h3><label>Category Name</label><input id="ac-name" class="admin-input" placeholder="Name"><label>Emoji</label><input id="ac-emoji" class="admin-input" placeholder="e.g. 👞"><button class="btn-primary" style="width:100%" onclick="saveNewCategory()">Save</button>'; openAdminModal(html); }
+async function saveNewCategory() { var name = document.getElementById('ac-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').insert({ name: name, emoji: document.getElementById('ac-emoji').value.trim() || '📁', sort_order: allCategories.length + 1, owner_email: viewingAdminEmail || currentUserEmail }); closeAdminModal(); showToast('Category added!', 'success'); renderAdminPanels(); }
+function editCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; var html = '<h3>✏️ Edit Category</h3><label>Name</label><input id="ec-name" class="admin-input" value="' + cat.name + '"><label>Emoji</label><input id="ec-emoji" class="admin-input" value="' + (cat.emoji || '') + '"><button class="btn-primary" style="width:100%" onclick="saveEditCategory(\'' + id + '\')">Update</button>'; openAdminModal(html); }
+async function saveEditCategory(id) { var name = document.getElementById('ec-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').update({ name: name, emoji: document.getElementById('ec-emoji').value.trim() }).eq('id', id); closeAdminModal(); showToast('Updated!', 'success'); renderCategoriesListAdmin(); }
+async function deleteCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; if (!confirm('Delete "' + cat.name + '" and all its subcategories?')) return; await supabase.from('categories').delete().eq('id', id); showToast('Deleted!', 'success'); renderCategoriesListAdmin(); }
+async function moveCatUp(i) { if (i === 0) return; var a = allCategories[i], b = allCategories[i - 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); loadDynamicData(); renderCategoriesListAdmin(); }
+async function moveCatDown(i) { if (i >= allCategories.length - 1) return; var a = allCategories[i], b = allCategories[i + 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); loadDynamicData(); renderCategoriesListAdmin(); }
+
+// ============ SUBCATEGORY CRUD ============
+function renderAddSubcategory(catId) { var html = '<h3>➕ Add Subcategory</h3><label>Name</label><input id="as-name" class="admin-input" placeholder="Subcategory Name"><button class="btn-primary" style="width:100%" onclick="saveNewSubcategory(\'' + catId + '\')">Save</button>'; openAdminModal(html); }
+async function saveNewSubcategory(catId) { var name = document.getElementById('as-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('subcategories').insert({ name: name, category_id: parseInt(catId), owner_email: viewingAdminEmail || currentUserEmail }); closeAdminModal(); showToast('Added!', 'success'); renderSubcategoriesAdmin(catId); }
+function editSubcategory(id) { var sub = allSubcategories.find(function(s) { return s.id == id; }); if (!sub) return; var html = '<h3>✏️ Edit Subcategory</h3><label>Name</label><input id="es-name" class="admin-input" value="' + sub.name + '"><button class="btn-primary" style="width:100%" onclick="saveEditSubcategory(\'' + id + '\')">Update</button>'; openAdminModal(html); }
+async function saveEditSubcategory(id) { var name = document.getElementById('es-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').update({ name: name }).eq('id', id); closeAdminModal(); showToast('Updated!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
+async function deleteSubcategory(id) { if (!confirm('Delete this subcategory and all its products?')) return; var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').delete().eq('id', id); showToast('Deleted!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
+
+// ============ EMAIL CENTER ============
+function renderEmailCenter() {
+    var isCEO = currentUserIsCEO;
+    var html = '<h3>✉️ Email Center</h3>';
+    if (isCEO) {
+        html += '<div class="tabs"><button class="tab active" onclick="switchEmailTab(\'partner\',this)">Registered Partner</button><button class="tab" onclick="switchEmailTab(\'custom\',this)">Custom Email</button></div>';
+        html += '<div id="email-partner-section"><label>Search Partner</label><input id="partner-search-input" class="admin-input" placeholder="Type business name..." oninput="filterPartnerDropdown()" autocomplete="off"><div class="dropdown-list" id="partner-dropdown"></div></div>';
+        html += '<div id="email-custom-section" style="display:none"><label>Recipient Email</label><input id="custom-recipient" type="email" class="admin-input" placeholder="customer@example.com"></div>';
+    } else {
+        html += '<div class="tabs"><button class="tab active" onclick="switchEmailTab(\'partner\',this)">Registered Partner</button><button class="tab" onclick="switchEmailTab(\'ceo\',this)">Send to CEO</button></div>';
+        html += '<div id="email-partner-section"><label>Select Partner</label><div class="dropdown-list show" id="partner-dropdown"></div></div>';
+        html += '<div id="email-custom-section" style="display:none"><p style="font-size:12px;color:var(--text-muted)">Message will be sent to the CEO</p></div>';
+    }
+    html += '<label>Subject</label><input id="email-subject" class="admin-input" placeholder="Subject"><label>Message</label><textarea id="email-message" class="admin-input" placeholder="Message" rows="3"></textarea>';
+    html += '<button class="btn-primary" style="width:100%" onclick="sendCustomEmail()">📤 Send Email</button><div id="email-status" class="status"></div>';
+    openAdminModal(html);
+    window._emailType = 'partner'; window._selectedPartner = null;
+    var dd = document.getElementById('partner-dropdown'); dd.innerHTML = '';
+    if (!isCEO) { dd.innerHTML += '<div class="dropdown-item" onclick="selectPartner(\'bayeroisa2003@gmail.com\',\'Abihani Isa (CEO)\')">Abihani Isa (CEO) <small style="color:var(--text-muted)">bayeroisa2003@gmail.com</small></div>'; }
+    supabase.from('admins').select('email,business_name').neq('role','Owner').then(function(r) { var partners = r.data || []; for (var i = 0; i < partners.length; i++) { var p = partners[i]; dd.innerHTML += '<div class="dropdown-item" onclick="selectPartner(\'' + p.email + '\',\'' + (p.business_name || p.email).replace(/'/g,"\\'") + '\')">' + (p.business_name || p.email) + ' <small style="color:var(--text-muted)">' + p.email + '</small></div>'; } dd.classList.add('show'); });
+}
+function filterPartnerDropdown() { var q = document.getElementById('partner-search-input').value.toLowerCase(); var dd = document.getElementById('partner-dropdown'); var items = dd.querySelectorAll('.dropdown-item'); for (var i = 0; i < items.length; i++) { items[i].style.display = items[i].textContent.toLowerCase().indexOf(q) !== -1 ? 'block' : 'none'; } dd.classList.add('show'); }
+function selectPartner(email, name) { window._selectedPartner = email; var si = document.getElementById('partner-search-input'); if (si) si.value = name + ' (' + email + ')'; document.getElementById('partner-dropdown').classList.remove('show'); }
+function switchEmailTab(type, btn) { window._emailType = type; var tabs = document.querySelectorAll('.tab'); for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active'); btn.classList.add('active'); var ps = document.getElementById('email-partner-section'); var cs = document.getElementById('email-custom-section'); if (type === 'partner') { ps.style.display = 'block'; cs.style.display = 'none'; } else { ps.style.display = 'none'; cs.style.display = 'block'; } }
+async function sendCustomEmail() {
+    var recipient;
+    if (window._emailType === 'partner') { recipient = window._selectedPartner; }
+    else if (window._emailType === 'ceo') { recipient = CONFIG.CEO_EMAIL; }
+    else { recipient = document.getElementById('custom-recipient').value.trim(); }
+    var subject = document.getElementById('email-subject').value.trim();
+    var message = document.getElementById('email-message').value.trim();
+    var statusEl = document.getElementById('email-status');
+    if (!recipient) { statusEl.textContent = 'Select or enter a recipient'; statusEl.className = 'status error'; return; }
+    if (!subject) { statusEl.textContent = 'Subject required'; statusEl.className = 'status error'; return; }
+    if (!message) { statusEl.textContent = 'Message required'; statusEl.className = 'status error'; return; }
+    statusEl.textContent = 'Sending...'; statusEl.className = 'status info';
+    var footer = currentUserIsCEO ? '<br><br><hr><p style="font-size:11px;color:#a6947e">Abihani Isa<br>Founder & CEO, Abihani Nig Ltd<br>www.abihaniexpress.com.ng</p>' : '';
+    var ok = await sendEmail(recipient, subject, '<p>' + message.replace(/\n/g, '<br>') + '</p>' + footer);
+    if (ok) { statusEl.textContent = 'Email sent! ✉️'; statusEl.className = 'status success'; document.getElementById('email-subject').value = ''; document.getElementById('email-message').value = ''; }
+    else { statusEl.textContent = 'Failed to send.'; statusEl.className = 'status error'; }
+}
+
+// ============ POPUPS (CUSTOM ORDER, BOOKS, ARTISAN) ============
+function openCustomOrderPopup() {
+    document.getElementById('custom-order-popup-title').textContent = CONFIG.CUSTOM_ORDER_TITLE;
+    document.getElementById('custom-order-popup-subtitle').textContent = CONFIG.CUSTOM_ORDER_SUBTITLE;
+    var form = document.getElementById('custom-order-form'); if (!form) return;
+    var h = '';
+    for (var f = 0; f < CONFIG.CUSTOM_ORDER_FIELDS.length; f++) { var fd = CONFIG.CUSTOM_ORDER_FIELDS[f]; h += '<label style="font-size:13px;font-weight:500;margin-top:8px;display:block">' + fd.label + (fd.required ? ' *' : ' <span style="color:var(--text-muted)">(Optional)</span>') + '</label>'; if (fd.type === 'textarea') h += '<textarea name="co_' + f + '" placeholder="' + fd.placeholder + '" ' + (fd.required ? 'required' : '') + ' rows="3" style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;font-family:inherit;background:var(--bg-primary);color:var(--text-primary)"></textarea>'; else h += '<input type="' + fd.type + '" name="co_' + f + '" placeholder="' + fd.placeholder + '" ' + (fd.required ? 'required' : '') + ' style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;background:var(--bg-primary);color:var(--text-primary)">'; }
+    h += '<button type="submit" class="btn-submit-order"><i class="fab fa-whatsapp"></i> Send via WhatsApp</button>';
+    form.innerHTML = h; document.getElementById('custom-order-popup').style.display = 'flex'; document.body.style.overflow = 'hidden';
+}
+function closeCustomOrderPopup() { document.getElementById('custom-order-popup').style.display = 'none'; document.body.style.overflow = ''; }
+function submitCustomOrder(e) {
+    e.preventDefault(); var msg = '🛠️ *CUSTOM ORDER REQUEST*\n\n';
+    for (var f = 0; f < CONFIG.CUSTOM_ORDER_FIELDS.length; f++) { var val = (document.querySelector('[name="co_' + f + '"]') ? document.querySelector('[name="co_' + f + '"]').value : '').trim(); if (val) msg += '*' + CONFIG.CUSTOM_ORDER_FIELDS[f].label + ':* ' + val + '\n'; }
+    msg += '\n📅 _Sent from Abihani Express Website_';
+    window.open('https://wa.me/' + CONFIG.WHATSAPP_NUMBER.replace(/[^0-9]/g, '') + '?text=' + encodeURIComponent(msg), '_blank');
+    closeCustomOrderPopup(); showToast('Sent via WhatsApp!', 'success');
+}
+function openBookPopup(i) { var b = CONFIG.BOOKS[i]; if (!b) return; document.getElementById('book-popup-img').src = b.cover; document.getElementById('book-popup-title').textContent = b.title; document.getElementById('book-popup-author').textContent = 'by ' + b.author; document.getElementById('book-popup-price').textContent = b.price; document.getElementById('book-popup-synopsis').textContent = b.synopsis || ''; var ab = document.getElementById('book-popup-action-btn'); if (b.isFree) { ab.innerHTML = '<i class="fas fa-download"></i> Download Free PDF'; ab.className = 'btn-popup-download'; ab.href = b.pdfUrl; ab.target = '_blank'; } else { ab.innerHTML = '<i class="fab fa-whatsapp"></i> Buy via WhatsApp'; ab.className = 'btn-popup-wa'; ab.href = 'https://wa.me/' + CONFIG.WHATSAPP_NUMBER.replace(/[^0-9]/g, '') + '?text=' + encodeURIComponent(b.waMessage); ab.target = '_blank'; } document.getElementById('book-popup').style.display = 'flex'; document.body.style.overflow = 'hidden'; }
+function closeBookPopup() { document.getElementById('book-popup').style.display = 'none'; document.body.style.overflow = ''; }
+function openArtisanPopup() { var container = document.getElementById('artisan-popup-container'); if (!container) return; container.innerHTML = '<div class="book-popup-overlay" style="display:flex" id="artisan-popup-inner"><div class="book-popup-content" style="max-width:500px"><span class="book-popup-close" onclick="closeArtisanPopup()">&times;</span><div style="text-align:center"><img src="' + CONFIG.ARTISAN_IMAGE + '" style="width:100%;max-width:300px;border-radius:16px;margin-bottom:16px" alt="' + CONFIG.ARTISAN_NAME + '"><span class="artisan-badge" style="display:inline-block;margin-bottom:8px">' + CONFIG.ARTISAN_BADGE_TEXT + '</span><h3 style="color:var(--accent);margin-bottom:8px">' + CONFIG.ARTISAN_NAME + '</h3><p style="color:var(--text-secondary);font-size:13px;line-height:1.6;margin-bottom:16px">' + CONFIG.ARTISAN_FULL_STORY + '</p><a href="https://wa.me/234' + CONFIG.ARTISAN_WHATSAPP.replace(/^0/, '') + '" class="btn-popup-wa" target="_blank"><i class="fab fa-whatsapp"></i> ' + CONFIG.ARTISAN_POPUP_CONTACT_TEXT + '</a></div></div></div>'; document.body.style.overflow = 'hidden'; }
+function closeArtisanPopup() { document.getElementById('artisan-popup-container').innerHTML = ''; document.body.style.overflow = ''; }
+
+// ============ FEEDBACK ============
+async function submitFeedback() {
+    var n = document.getElementById('contact-name') ? document.getElementById('contact-name').value.trim() : 'Anonymous';
+    var e = document.getElementById('contact-email') ? document.getElementById('contact-email').value.trim() : '';
+    var m = document.getElementById('contact-message') ? document.getElementById('contact-message').value.trim() : '';
+    if (!m) { showToast('Please enter a message', 'error'); return; }
+    var btn = document.getElementById('feedback-send-btn'); setBtnLoading(btn, 'Sending...');
+    await supabase.from('feedback').insert({ name: n || 'Anonymous', message: m });
+    var emailBody = '<p><strong>Name:</strong> ' + (n || 'Anonymous') + '</p>';
+    if (e) emailBody += '<p><strong>Email:</strong> ' + e + '</p>';
+    emailBody += '<p><strong>Message:</strong></p><p>' + m.replace(/\n/g, '<br>') + '</p>';
+    sendEmail(CONFIG.CEO_EMAIL, '📬 New Feedback from ' + (n || 'Anonymous'), emailBody);
+    resetBtn(btn, 'Send feedback');
+    document.getElementById('contact-name').value = ''; if (document.getElementById('contact-email')) document.getElementById('contact-email').value = ''; document.getElementById('contact-message').value = '';
+    showToast('Feedback sent! Thank you! 📬', 'success');
+}
+
+// ============ SESSION CHECK ============
+(async function() {
+    var session = await supabase.auth.getSession();
+    if (session.data && session.data.session) {
+        var email = session.data.session.user.email;
+        if (CONFIG.ADMIN_CEO_EMAILS.indexOf(email) !== -1) { isAdminLoggedIn = true; currentUserEmail = email; currentUserRole = 'Owner'; currentUserIsCEO = true; saveSession(); }
+    }
+})();
+
+// ============ FINAL EXPOSE ============
+window.renderAdminPanels = renderAdminPanels;
+window.renderAdminRequests = renderAdminRequests;
+window.loadRequestTab = loadRequestTab;
+window.approveApp = approveApp; window.rejectApp = rejectApp; window.deleteRejectedApp = deleteRejectedApp;
+window.renderPartners = renderPartners;
+window.viewAdminDashboard = viewAdminDashboard;
+window.freezeAdmin = freezeAdmin; window.unfreezeAdmin = unfreezeAdmin; window.deleteAdminCompletely = deleteAdminCompletely;
+window.renderSettings = renderSettings; window.saveAdminSettings = saveAdminSettings; window.saveCEOSettings = saveCEOSettings;
+window.saveAnnouncement = saveAnnouncement;
+window.renderAllProductsAdmin = renderAllProductsAdmin;
+window.renderCategoriesListAdmin = renderCategoriesListAdmin;
+window.renderSubcategoriesAdmin = renderSubcategoriesAdmin;
+window.renderSubProductsAdmin = renderSubProductsAdmin;
+window.showAddProductForm = showAddProductForm; window.addAddSidePicker = addAddSidePicker;
+window.saveNewProduct = saveNewProduct;
+window.renderEditProduct = renderEditProduct; window.addSidePicker = addSidePicker;
+window.removeSideRow = removeSideRow;
+window.saveEditProduct = saveEditProduct; window.deleteProductConfirm = deleteProductConfirm;
+window.showAddCategoryForm = showAddCategoryForm; window.saveNewCategory = saveNewCategory;
+window.editCategory = editCategory; window.saveEditCategory = saveEditCategory;
+window.deleteCategory = deleteCategory;
+window.moveCatUp = moveCatUp; window.moveCatDown = moveCatDown;
+window.renderAddSubcategory = renderAddSubcategory; window.saveNewSubcategory = saveNewSubcategory;
+window.editSubcategory = editSubcategory; window.saveEditSubcategory = saveEditSubcategory;
+window.deleteSubcategory = deleteSubcategory;
+window.renderEmailCenter = renderEmailCenter; window.switchEmailTab = switchEmailTab;
+window.filterPartnerDropdown = filterPartnerDropdown; window.selectPartner = selectPartner;
+window.sendCustomEmail = sendCustomEmail;
+window.openCustomOrderPopup = openCustomOrderPopup; window.closeCustomOrderPopup = closeCustomOrderPopup;
+window.submitCustomOrder = submitCustomOrder;
+window.openBookPopup = openBookPopup; window.closeBookPopup = closeBookPopup;
+window.openArtisanPopup = openArtisanPopup; window.closeArtisanPopup = closeArtisanPopup;
+window.submitFeedback = submitFeedback;
+
+// ============================================
+// END — ABIHANI EXPRESS v18 🌸
+// ============================================
