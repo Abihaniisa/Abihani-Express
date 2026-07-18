@@ -1,5 +1,5 @@
 // ============================================
-// ABIHANI EXPRESS v18 — Complete JavaScript
+// ABIHANI EXPRESS v18 — Complete Rebuild
 // ============================================
 var supabase = window.supabase.createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY);
 var allProducts = [], allCategories = [], allSubcategories = [], currentFilterCategory = null;
@@ -10,26 +10,16 @@ var mockProducts = [], mockCategories = [], mockSubcategories = [];
 var currentDetailImages = [], currentDetailIndex = 0, detailSource = 'shop';
 var maintenanceModeActive = CONFIG.MAINTENANCE_MODE_ENABLED || false;
 var currentDetailProduct = null, deferredPWA = null, haniTourActive = false, haniTourStep = 0;
-var inactivityTimer, haniReturnTimer;
+var haniIdleTimer, inactivityTimer;
+var pendingDetailId = null;
 
-// ============ EMAIL SENDER ============
+// ============ EMAIL SENDER (VIA API ROUTE) ============
 async function sendEmail(to, subject, html) {
-    var fullHtml = '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#fdf9f5;">';
-    fullHtml += '<div style="text-align:center;padding:20px 0;">';
-    fullHtml += '<h1 style="color:#b87c4f;font-family:Georgia,serif;font-size:28px;margin:0;">Abihani Express</h1>';
-    fullHtml += '<p style="color:#6b5a4a;font-size:13px;margin:4px 0 0;">Your perfect home for leather works</p>';
-    fullHtml += '</div>';
-    fullHtml += '<div style="background:#fff;border-radius:12px;padding:24px;border:1px solid #e8dfd6;">';
-    fullHtml += html;
-    fullHtml += '</div>';
-    fullHtml += '<hr style="border-color:#e8dfd6;margin:16px 0 8px;">';
-    fullHtml += '<p style="font-size:11px;color:#a6947e;text-align:center;">Abihani Isa<br>Founder & CEO, Abihani Nig Ltd<br>www.abihaniexpress.com.ng</p>';
-    fullHtml += '</div>';
     try {
         var response = await fetch('/api/send-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ to: to, subject: subject, html: fullHtml })
+            body: JSON.stringify({ to: to, subject: subject, html: html })
         });
         return response.ok;
     } catch(err) { console.error('Email error:', err); return false; }
@@ -55,8 +45,12 @@ function showToast(msg, type) {
 (function init() {
     var path = window.location.pathname.replace(/\//g, '') || 'home';
     if (path === 'index.html') path = 'home';
+    if (path === 'product-detail') {
+        var urlParams = new URLSearchParams(window.location.search);
+        pendingDetailId = urlParams.get('id');
+    }
     pageHistoryStack = [path];
-    history.replaceState({ page: path, isAppPage: true }, '', '/' + (path === 'home' ? '' : path));
+    history.replaceState({ page: path, isAppPage: true }, '', '/' + (path === 'home' ? '' : path) + window.location.search);
     checkSession();
 })();
 
@@ -189,18 +183,11 @@ function showTourStep(i) {
     document.getElementById('hani-tour-text').textContent = steps[i].text;
     var actDiv = document.getElementById('hani-tour-actions');
     actDiv.innerHTML = '';
-    if (i < steps.length - 1) {
-        var nextBtn = document.createElement('button');
-        nextBtn.className = 'btn-primary btn-sm'; nextBtn.textContent = 'Next →'; nextBtn.onclick = function() { showTourStep(i + 1); };
-        actDiv.appendChild(nextBtn);
-    } else {
-        var doneBtn = document.createElement('button');
-        doneBtn.className = 'btn-primary btn-sm'; doneBtn.textContent = 'Finish Tour 🎉'; doneBtn.onclick = endHaniTour;
-        actDiv.appendChild(doneBtn);
-    }
-    var skipBtn = document.createElement('button');
-    skipBtn.className = 'btn-secondary btn-sm'; skipBtn.textContent = 'Skip Tour'; skipBtn.onclick = endHaniTour;
-    actDiv.appendChild(skipBtn);
+    var btnText = i < steps.length - 1 ? 'Next →' : 'Finish Tour 🎉';
+    var btnAction = i < steps.length - 1 ? function() { showTourStep(i + 1); } : endHaniTour;
+    actDiv.innerHTML += '<button class="btn-primary btn-sm" onclick="arguments[0]">' + btnText + '</button>';
+    actDiv.querySelector('button').onclick = btnAction;
+    actDiv.innerHTML += '<button class="btn-secondary btn-sm" onclick="endHaniTour()">Skip Tour</button>';
     var dotsDiv = document.getElementById('hani-tour-dots'); dotsDiv.innerHTML = '';
     for (var j = 0; j < steps.length; j++) { dotsDiv.innerHTML += '<span class="hani-tour-dot' + (j === i ? ' active' : '') + '"></span>'; }
     var el = document.querySelector(steps[i].selector);
@@ -215,27 +202,19 @@ function endHaniTour() {
     ], 'success');
 }
 
-// ============ HANI CHARACTER (DRAGGABLE + SNAP BACK) ============
+// ============ HANI CHARACTER (NO SLEEPING) ============
 function initHaniCharacter() {
     var char = document.getElementById('hani-character');
     char.style.display = 'flex';
     document.getElementById('hani-char-img').src = CONFIG.HANI_IMAGE;
     var stored = localStorage.getItem('hani_visible');
     if (stored === '0') char.style.display = 'none';
-    char.style.position = 'fixed'; char.style.bottom = '100px'; char.style.right = '20px';
-    char.style.transition = 'all 0.3s ease'; char.style.zIndex = '500';
-    char.addEventListener('touchstart', function(e) {
-        char.style.transition = 'none';
-        var touch = e.touches[0]; var rect = char.getBoundingClientRect();
-        var offsetX = touch.clientX - rect.left; var offsetY = touch.clientY - rect.top;
-        function move(ev) { var t = ev.touches[0]; char.style.left = (t.clientX - offsetX) + 'px'; char.style.top = (t.clientY - offsetY) + 'px'; char.style.right = 'auto'; char.style.bottom = 'auto'; }
-        function up() { document.removeEventListener('touchmove', move); document.removeEventListener('touchend', up); char.style.transition = 'all 0.3s ease'; var r = char.getBoundingClientRect(); if (r.left + r.width/2 < window.innerWidth/2) { char.style.left = '12px'; char.style.right = 'auto'; } else { char.style.right = '12px'; char.style.left = 'auto'; } clearTimeout(haniReturnTimer); haniReturnTimer = setTimeout(function() { char.style.right = '20px'; char.style.bottom = '100px'; char.style.left = 'auto'; char.style.top = 'auto'; }, 5000); }
-        document.addEventListener('touchmove', move); document.addEventListener('touchend', up);
-    });
+    // Removed sleeping animation — keeps it lightweight
 }
 function toggleHaniChat() {
     var char = document.getElementById('hani-character');
-    char.classList.add('waving'); document.getElementById('hani-char-status').textContent = 'Hi! 👋';
+    char.classList.add('waving');
+    document.getElementById('hani-char-status').textContent = 'Hi! 👋';
     setTimeout(function() { char.classList.remove('waving'); document.getElementById('hani-char-status').textContent = ''; }, 1500);
 }
 function toggleHaniVisibility(show) {
@@ -247,11 +226,15 @@ function toggleHaniVisibility(show) {
 // ============ PWA ============
 function initPWA() {
     window.addEventListener('beforeinstallprompt', function(e) { e.preventDefault(); deferredPWA = e; if (!localStorage.getItem('abihani_tour_done')) return; setTimeout(function() { showPWABanner(); }, 3000); });
-    if ('serviceWorker' in navigator) { window.addEventListener('load', function() { navigator.serviceWorker.register('/sw.js').then(function() {}).catch(function() {}); }); }
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() { navigator.serviceWorker.register('/sw.js').then(function() {}).catch(function() {}); });
+    }
 }
 function showPWABanner() { if (!deferredPWA) return; document.getElementById('pwa-install-banner').style.display = 'flex'; }
 function closePWAInstall() { document.getElementById('pwa-install-banner').style.display = 'none'; }
-function installPWA() { if (deferredPWA) { deferredPWA.prompt(); deferredPWA.userChoice.then(function(r) { if (r.outcome === 'accepted') { document.getElementById('pwa-install-banner').style.display = 'none'; deferredPWA = null; } }); } }
+function installPWA() {
+    if (deferredPWA) { deferredPWA.prompt(); deferredPWA.userChoice.then(function(r) { if (r.outcome === 'accepted') { document.getElementById('pwa-install-banner').style.display = 'none'; deferredPWA = null; } }); }
+}
 
 // ============ SKELETON ============
 function showAllSkeletons() {
@@ -275,9 +258,15 @@ async function loadDynamicData() {
     if (mockDataActive) mergeMockData();
     updateCategoriesHome(); updateShopCategories(); updateFeaturedProducts();
     var ag = document.getElementById('all-products-grid'); if (ag) renderAllProducts();
+    if (pendingDetailId) {
+        var pid = pendingDetailId; pendingDetailId = null;
+        var found = allProducts.find(function(x) { return x.id == pid; });
+        if (found) { showProductDetail(pid, 'shop'); }
+        else { showToast('Product not found', 'error'); }
+    }
 }
 
-// ============ MOCK DATA ============
+// ============ MOCK DATA (KEPT FOR PUBLIC DISPLAY) ============
 function generateMockData(count) {
     mockCategories = []; mockSubcategories = []; mockProducts = [];
     for (var i = 0; i < CONFIG.MOCK_DATA_CATEGORIES.length; i++) { var cat = CONFIG.MOCK_DATA_CATEGORIES[i]; mockCategories.push({ id: 'mock-cat-' + i, name: cat.name, emoji: cat.emoji, sort_order: i + 1, owner_email: 'mock', is_mock: true }); }
@@ -294,10 +283,12 @@ function mergeMockData() {
     for (var k = 0; k < mockProducts.length; k++) { if (!allProducts.find(function(p) { return p.id === mockProducts[k].id; })) allProducts.push(mockProducts[k]); }
 }
 async function toggleMockData(enabled) {
-    mockDataActive = enabled; await supabase.from('site_settings').update({ mock_data_enabled: enabled }).eq('id', 1);
+    mockDataActive = enabled;
+    await supabase.from('site_settings').update({ mock_data_enabled: enabled }).eq('id', 1);
     if (enabled) { generateMockData(CONFIG.MOCK_DATA_PRODUCT_COUNT || 20); mergeMockData(); }
     else { allCategories = allCategories.filter(function(c) { return !c.is_mock; }); allSubcategories = allSubcategories.filter(function(s) { return !s.is_mock; }); allProducts = allProducts.filter(function(p) { return !p.is_mock; }); mockCategories = []; mockSubcategories = []; mockProducts = []; }
-    updateCategoriesHome(); updateShopCategories(); updateFeaturedProducts(); var ag = document.getElementById('all-products-grid'); if (ag) renderAllProducts();
+    updateCategoriesHome(); updateShopCategories(); updateFeaturedProducts();
+    var ag = document.getElementById('all-products-grid'); if (ag) renderAllProducts();
     if (isAdminLoggedIn) renderAdminPanels();
 }
 function generateMockCount() {
@@ -305,7 +296,8 @@ function generateMockCount() {
     var countEl = document.getElementById('mock-data-count'); var count = parseInt(countEl ? countEl.value : 20) || 20;
     allProducts = allProducts.filter(function(p) { return !p.is_mock; }); allCategories = allCategories.filter(function(c) { return !c.is_mock; }); allSubcategories = allSubcategories.filter(function(s) { return !s.is_mock; });
     mockCategories = []; mockSubcategories = []; mockProducts = []; generateMockData(count); mergeMockData();
-    updateCategoriesHome(); updateShopCategories(); updateFeaturedProducts(); var ag = document.getElementById('all-products-grid'); if (ag) renderAllProducts();
+    updateCategoriesHome(); updateShopCategories(); updateFeaturedProducts();
+    var ag = document.getElementById('all-products-grid'); if (ag) renderAllProducts();
     renderAdminPanels(); showToast(count + ' mock products generated!', 'success');
 }
 function setMockFeaturePercent() {
@@ -366,7 +358,7 @@ function navigateTo(pageName, addToHistory) {
     if (addToHistory === undefined) addToHistory = true;
     if (pageName === 'profile' && isAdminLoggedIn) { pageName = 'admin-dashboard'; }
     if (pageName === 'admin-dashboard' && !isAdminLoggedIn) { pageName = 'profile'; }
-    if (pageName === 'admin-dashboard') { showPage('admin-dashboard'); pushToHistory('admin-dashboard'); resetInactivityTimer(); return; }
+    if (pageName === 'admin-dashboard') { showPage('admin-dashboard'); renderAdminPanels(); pushToHistory('admin-dashboard'); resetInactivityTimer(); return; }
     if (pageName === 'product-detail') return;
     showPage(pageName);
     if (addToHistory && pageName !== pageHistoryStack[pageHistoryStack.length - 1]) pushToHistory(pageName);
@@ -375,6 +367,7 @@ function navigateTo(pageName, addToHistory) {
 function pushToHistory(page) {
     pageHistoryStack.push(page);
     var url = '/' + (page === 'home' ? '' : page);
+    if (page === 'product-detail' && currentDetailProduct) url += '?id=' + currentDetailProduct.id;
     history.pushState({ page: page, isAppPage: true }, '', url);
 }
 function goBackSmart() {
@@ -392,6 +385,10 @@ function showPage(pageName) {
     if (pageName === 'admin-dashboard' && !isAdminLoggedIn) { navigateTo('profile', false); return; }
     document.querySelectorAll('.page-section').forEach(function(p) { p.classList.remove('active-page'); });
     var map = { 'home': 'home-page', 'shop': 'shop-page', 'product-detail': 'product-detail-page', 'search': 'search-page', 'about': 'about-page', 'contact': 'contact-page', 'terms': 'terms-page', 'privacy': 'privacy-page', 'profile': 'profile-page', 'admin-login': 'admin-login-page', 'admin-dashboard': 'admin-dashboard-page' };
+    if (pageName === 'admin-dashboard') {
+        var ctn = document.getElementById('admin-dashboard-content');
+        if (ctn) ctn.innerHTML = '<div style="text-align:center;padding:60px 20px"><div class="spinner" style="width:40px;height:40px;border-width:3px;border-color:rgba(184,124,79,0.2);border-top-color:#b87c4f;margin:0 auto 16px"></div><p style="color:var(--text-muted);font-size:14px">Loading dashboard...</p></div>';
+    }
     var target = document.getElementById(map[pageName]); if (target) target.classList.add('active-page');
     if (pageName === 'shop') renderAllProducts();
     if (pageName === 'search') { var sr = document.getElementById('search-results'); if (sr) sr.innerHTML = ''; var si = document.getElementById('search-input'); if (si) si.value = ''; }
@@ -413,10 +410,15 @@ window.addEventListener('popstate', function(e) {
     pageHistoryStack = pageHistoryStack.filter(function(p) { return p !== path; });
     pageHistoryStack.push(path);
     if (validAppPages.indexOf(path) === -1) { navigateTo('home', false); return; }
-    if (path === 'product-detail') { navigateTo('shop', false); } else showPage(path);
+    if (path === 'product-detail') {
+        var urlParams = new URLSearchParams(window.location.search);
+        var pid = urlParams.get('id');
+        if (pid && allProducts.length) { showProductDetail(pid, detailSource || 'shop'); }
+        else { navigateTo('shop', false); }
+    } else showPage(path);
 });
 var initPath = window.location.pathname.replace(/\//g, '') || 'home';
-(function() { pageHistoryStack = [initPath]; showPage(initPath); })();
+(function() { pageHistoryStack = [initPath]; showPage(initPath === 'product-detail' ? 'shop' : initPath); })();
 
 // ============ DOM EVENTS ============
 document.addEventListener('DOMContentLoaded', function() {
@@ -630,7 +632,7 @@ async function submitAdminApplication() {
     }
     var expiryDate = new Date(); expiryDate.setMonth(expiryDate.getMonth() + CONFIG.ADMIN_DURATION_MONTHS);
     await supabase.from('admin_applications').insert({ name: name, business_name: business, email: email, whatsapp: whatsapp, password_hash: '', status: 'pending', expiry_date: expiryDate.toISOString() });
-    sendEmail(CONFIG.CEO_EMAIL, '📋 New Administratorship Request from ' + name, '<p><strong>Name:</strong> ' + name + '</p><p><strong>Business:</strong> ' + business + '</p><p><strong>Email:</strong> ' + email + '</p><p><strong>WhatsApp:</strong> ' + whatsapp + '</p>');
+    sendEmail(CEO_EMAIL, '📋 New Administratorship Request from ' + name, '<p><strong>Name:</strong> ' + name + '</p><p><strong>Business:</strong> ' + business + '</p><p><strong>Email:</strong> ' + email + '</p><p><strong>WhatsApp:</strong> ' + whatsapp + '</p>');
     closeAdminModal();
     showToast('Request sent! Check your email for updates.', 'success');
 }
@@ -653,13 +655,7 @@ function buyNow(id) {
     var p = allProducts.find(function(x) { return x.id == id; }); if (!p) return;
     if (p.is_mock) { showToast('This is a mock product for display', 'info'); return; }
     var whatsapp = p.owner_whatsapp || CONFIG.WHATSAPP_NUMBER;
-    var msg = '*Abihani Express — New Order Request*%0A%0A' +
-              '👋 Hello! I am interested in purchasing:%0A%0A' +
-              '📦 *Product:* ' + p.name + '%0A' +
-              '💰 *Price:* ₦' + p.price.toLocaleString() + '%0A' +
-              '🔗 *View Product:* ' + CONFIG.SITE_URL + '/product-detail?id=' + p.id + '%0A%0A' +
-              'Please confirm availability and total cost including delivery. Thank you!';
-    window.open('https://wa.me/' + whatsapp.replace(/[^0-9]/g, '') + '?text=' + msg, '_blank');
+    window.open('https://wa.me/' + whatsapp.replace(/[^0-9]/g, '') + '?text=Hello! I want: ' + encodeURIComponent(p.name) + ' (₦' + p.price + ')', '_blank');
 }
 function showExpiryWarning(expiryDate) { showToast('Your partnership expires on ' + expiryDate.toLocaleDateString() + '. Contact CEO to renew.', 'info'); }
 async function checkUnreadMessages(email) {
@@ -669,7 +665,8 @@ async function checkUnreadMessages(email) {
 
 // ============ MAINTENANCE MODE ============
 async function checkMaintenanceMode() {
-    if (!maintenanceModeActive) return; var bp = CONFIG.MAINTENANCE_MODE_BYPASS_PATH || '/admin';
+    if (!maintenanceModeActive) return;
+    var bp = CONFIG.MAINTENANCE_MODE_BYPASS_PATH || '/admin';
     if (window.location.pathname === bp) return;
     var ms = await supabase.from('site_settings').select('maintenance_mode').eq('id', 1).single();
     if (ms.data && ms.data.maintenance_mode === true) showMaintenanceScreen();
@@ -706,7 +703,6 @@ window.showHaniPopup = showHaniPopup; window.closeHaniPopup = closeHaniPopup;
 window.toggleHaniChat = toggleHaniChat; window.showPWABanner = showPWABanner;
 window.closePWAInstall = closePWAInstall; window.installPWA = installPWA;
 window.toggleHaniVisibility = toggleHaniVisibility;
-
 // ============ ADMIN DASHBOARD ============
 async function renderAdminPanels() {
     await loadDynamicData();
@@ -726,7 +722,6 @@ async function renderAdminPanels() {
 
     // Viewing partner banner (CEO only)
     if (isCEO && viewingAdminEmail) {
-      html += '<div class="flex-between" style="margin-bottom:16px"><button class="btn-outline btn-sm" onclick="viewingAdminEmail=null;renderAdminPanels()">← Back to Partners</button><span></span></div>';
         var viewedAdmin = await supabase.from('admins').select('*').eq('email', viewingAdminEmail).single();
         var ad = viewedAdmin.data || {};
         var isExpired = ad.expiry_date && new Date(ad.expiry_date) < new Date();
@@ -756,15 +751,12 @@ async function renderAdminPanels() {
         html += '<div class="admin-section-card"><h4 onclick="renderPartners()" style="cursor:pointer">' + CONFIG.ADMIN_PARTNERS_SECTION_NAME + ' <i class="fas fa-arrow-right" style="font-size:14px;color:var(--text-muted)"></i></h4></div>';
     }
 
-    // Settings
+    // Settings (only own dashboard)
     if (!viewingAdminEmail) {
         html += '<div class="admin-card" style="cursor:pointer" onclick="renderSettings()"><h4 style="color:var(--accent)"><i class="fas fa-cog"></i> ' + CONFIG.SETTINGS_TITLE + '</h4><p style="font-size:11px;color:var(--text-muted)">Manage your details</p></div>';
-        if (isCEO) { html += '<div class="admin-card" style="margin-top:12px"><h4 style="color:var(--accent);display:flex;align-items:center;justify-content:space-between">🌸 Hani <label class="mock-toggle"><input type="checkbox" id="hani-toggle-checkbox" checked onchange="toggleHaniVisibility(this.checked)"><span class="mock-toggle-slider"></span></label></h4></div>'; }
-    }
-
-    // Admin Guide
-    if (!viewingAdminEmail) {
-        html += '<div class="admin-guide-card"><h4 onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\'">' + CONFIG.ADMIN_GUIDE_TITLE + ' <i class="fas fa-chevron-down" style="font-size:12px"></i></h4><div style="display:none"><table><tr><td>📦 Products</td><td>Create & manage your leather goods</td></tr><tr><td>📁 Categories</td><td>Organize products into sections</td></tr><tr><td>🔖 Subcategories</td><td>Further refine your catalog</td></tr><tr><td>⭐ Featured</td><td>Highlight products on homepage</td></tr><tr><td>📷 Images</td><td>Upload main + side images</td></tr><tr><td>💰 Discounts</td><td>Set percentage-based sales</td></tr></table><p style="font-size:10px;color:var(--text-muted);text-align:right;margin-top:4px">' + CONFIG.ADMIN_GUIDE_FOOTER + '</p></div></div>';
+        if (isCEO) {
+            html += '<div class="admin-card" style="margin-top:12px"><h4 style="color:var(--accent);display:flex;align-items:center;justify-content:space-between">🌸 Hani <label class="mock-toggle"><input type="checkbox" id="hani-toggle-checkbox" checked onchange="toggleHaniVisibility(this.checked)"><span class="mock-toggle-slider"></span></label></h4></div>';
+        }
     }
 
     html += '<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap"><button class="btn-primary" onclick="showAddProductForm()"><i class="fas fa-plus"></i> ' + CONFIG.UI_ADD_PRODUCT + '</button><button class="btn-secondary" onclick="showAddCategoryForm()"><i class="fas fa-plus"></i> ' + CONFIG.UI_ADD_CATEGORY + '</button></div>';
@@ -826,7 +818,7 @@ async function approveApp(id) {
     await supabase.from('admin_applications').update({ status: 'approved', approved_at: new Date().toISOString(), expiry_date: expiry.toISOString() }).eq('id', id);
     await supabase.from('admins').insert({ email: d.email, password_hash: '', name: d.name, business_name: d.business_name, whatsapp: d.whatsapp, role: 'admin', status: 'pending_password', expiry_date: expiry.toISOString() });
     sendEmail(d.email, CONFIG.APPROVAL_EMAIL_SUBJECT, CONFIG.APPROVAL_EMAIL_BODY.replace(/{name}/g, d.name).replace(/{business}/g, d.business_name).replace(/{expiry}/g, expiry.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })));
-    sendEmail(CONFIG.CEO_EMAIL, 'New Admin Approved: ' + d.name, '<p>' + d.name + ' (' + d.business_name + ') approved.</p>');
+    sendEmail(CEO_EMAIL, 'New Admin Approved: ' + d.name, '<p>' + d.name + ' (' + d.business_name + ') approved.</p>');
     showToast('Approved! Email sent.', 'success'); loadRequestTab('pending', document.querySelector('.admin-tab'));
 }
 async function rejectApp(id) {
@@ -1065,162 +1057,5 @@ async function saveEditProduct(id) {
     closeAdminModal(); showToast('Product updated!', 'success'); renderAdminPanels();
 }
 async function deleteProductConfirm(id, name) {
-    confirmDelete('Delete "' + name + '" permanently?', async function() {
-        await supabase.from('products').delete().eq('id', id);
-        closeAdminModal(); showToast('Product deleted', 'success'); renderAdminPanels();
-    });
-}
-
-// ============ CATEGORY CRUD ============
-function showAddCategoryForm() { var html = '<h3>➕ Add Category</h3><label>Category Name</label><input id="ac-name" class="admin-input" placeholder="Name"><label>Emoji</label><input id="ac-emoji" class="admin-input" placeholder="e.g. 👞"><button class="btn-primary" style="width:100%" onclick="saveNewCategory()">Save</button>'; openAdminModal(html); }
-async function saveNewCategory() { var name = document.getElementById('ac-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').insert({ name: name, emoji: document.getElementById('ac-emoji').value.trim() || '📁', sort_order: allCategories.length + 1, owner_email: viewingAdminEmail || currentUserEmail }); closeAdminModal(); showToast('Category added!', 'success'); renderAdminPanels(); }
-function editCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; var html = '<h3>✏️ Edit Category</h3><label>Name</label><input id="ec-name" class="admin-input" value="' + cat.name + '"><label>Emoji</label><input id="ec-emoji" class="admin-input" value="' + (cat.emoji || '') + '"><button class="btn-primary" style="width:100%" onclick="saveEditCategory(\'' + id + '\')">Update</button>'; openAdminModal(html); }
-async function saveEditCategory(id) { var name = document.getElementById('ec-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').update({ name: name, emoji: document.getElementById('ec-emoji').value.trim() }).eq('id', id); closeAdminModal(); showToast('Updated!', 'success'); renderCategoriesListAdmin(); }
-async function deleteCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; if (!confirm('Delete "' + cat.name + '" and all its subcategories?')) return; await supabase.from('categories').delete().eq('id', id); showToast('Deleted!', 'success'); renderCategoriesListAdmin(); }
-async function moveCatUp(i) { if (i === 0) return; var a = allCategories[i], b = allCategories[i - 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); loadDynamicData(); renderCategoriesListAdmin(); }
-async function moveCatDown(i) { if (i >= allCategories.length - 1) return; var a = allCategories[i], b = allCategories[i + 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); loadDynamicData(); renderCategoriesListAdmin(); }
-
-// ============ SUBCATEGORY CRUD ============
-function renderAddSubcategory(catId) { var html = '<h3>➕ Add Subcategory</h3><label>Name</label><input id="as-name" class="admin-input" placeholder="Subcategory Name"><button class="btn-primary" style="width:100%" onclick="saveNewSubcategory(\'' + catId + '\')">Save</button>'; openAdminModal(html); }
-async function saveNewSubcategory(catId) { var name = document.getElementById('as-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('subcategories').insert({ name: name, category_id: parseInt(catId), owner_email: viewingAdminEmail || currentUserEmail }); closeAdminModal(); showToast('Added!', 'success'); renderSubcategoriesAdmin(catId); }
-function editSubcategory(id) { var sub = allSubcategories.find(function(s) { return s.id == id; }); if (!sub) return; var html = '<h3>✏️ Edit Subcategory</h3><label>Name</label><input id="es-name" class="admin-input" value="' + sub.name + '"><button class="btn-primary" style="width:100%" onclick="saveEditSubcategory(\'' + id + '\')">Update</button>'; openAdminModal(html); }
-async function saveEditSubcategory(id) { var name = document.getElementById('es-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').update({ name: name }).eq('id', id); closeAdminModal(); showToast('Updated!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
-async function deleteSubcategory(id) { if (!confirm('Delete this subcategory and all its products?')) return; var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').delete().eq('id', id); showToast('Deleted!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
-
-// ============ EMAIL CENTER ============
-function renderEmailCenter() {
-    var isCEO = currentUserIsCEO;
-    var html = '<h3>✉️ Email Center</h3>';
-    if (isCEO) {
-        html += '<div class="tabs"><button class="tab active" onclick="switchEmailTab(\'partner\',this)">Registered Partner</button><button class="tab" onclick="switchEmailTab(\'custom\',this)">Custom Email</button></div>';
-        html += '<div id="email-partner-section"><label>Search Partner</label><input id="partner-search-input" class="admin-input" placeholder="Type business name..." oninput="filterPartnerDropdown()" autocomplete="off"><div class="dropdown-list" id="partner-dropdown"></div></div>';
-        html += '<div id="email-custom-section" style="display:none"><label>Recipient Email</label><input id="custom-recipient" type="email" class="admin-input" placeholder="customer@example.com"></div>';
-    } else {
-        html += '<div class="tabs"><button class="tab active" onclick="switchEmailTab(\'partner\',this)">Registered Partner</button><button class="tab" onclick="switchEmailTab(\'ceo\',this)">Send to CEO</button></div>';
-        html += '<div id="email-partner-section"><label>Select Partner</label><div class="dropdown-list show" id="partner-dropdown"></div></div>';
-        html += '<div id="email-custom-section" style="display:none"><p style="font-size:12px;color:var(--text-muted)">Message will be sent to the CEO</p></div>';
-    }
-    html += '<label>Subject</label><input id="email-subject" class="admin-input" placeholder="Subject"><label>Message</label><textarea id="email-message" class="admin-input" placeholder="Message" rows="3"></textarea>';
-    html += '<button class="btn-primary" style="width:100%" onclick="sendCustomEmail()">📤 Send Email</button><div id="email-status" class="status"></div>';
-    openAdminModal(html);
-    window._emailType = 'partner'; window._selectedPartner = null;
-    var dd = document.getElementById('partner-dropdown'); dd.innerHTML = '';
-    if (!isCEO) { dd.innerHTML += '<div class="dropdown-item" onclick="selectPartner(\'bayeroisa2003@gmail.com\',\'Abihani Isa (CEO)\')">Abihani Isa (CEO) <small style="color:var(--text-muted)">bayeroisa2003@gmail.com</small></div>'; }
-    supabase.from('admins').select('email,business_name').neq('role','Owner').then(function(r) { var partners = r.data || []; for (var i = 0; i < partners.length; i++) { var p = partners[i]; dd.innerHTML += '<div class="dropdown-item" onclick="selectPartner(\'' + p.email + '\',\'' + (p.business_name || p.email).replace(/'/g,"\\'") + '\')">' + (p.business_name || p.email) + ' <small style="color:var(--text-muted)">' + p.email + '</small></div>'; } dd.classList.add('show'); });
-}
-function filterPartnerDropdown() { var q = document.getElementById('partner-search-input').value.toLowerCase(); var dd = document.getElementById('partner-dropdown'); var items = dd.querySelectorAll('.dropdown-item'); for (var i = 0; i < items.length; i++) { items[i].style.display = items[i].textContent.toLowerCase().indexOf(q) !== -1 ? 'block' : 'none'; } dd.classList.add('show'); }
-function selectPartner(email, name) { window._selectedPartner = email; var si = document.getElementById('partner-search-input'); if (si) si.value = name + ' (' + email + ')'; document.getElementById('partner-dropdown').classList.remove('show'); }
-function switchEmailTab(type, btn) { window._emailType = type; var tabs = document.querySelectorAll('.tab'); for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active'); btn.classList.add('active'); var ps = document.getElementById('email-partner-section'); var cs = document.getElementById('email-custom-section'); if (type === 'partner') { ps.style.display = 'block'; cs.style.display = 'none'; } else { ps.style.display = 'none'; cs.style.display = 'block'; } }
-async function sendCustomEmail() {
-    var recipient;
-    if (window._emailType === 'partner') { recipient = window._selectedPartner; }
-    else if (window._emailType === 'ceo') { recipient = CONFIG.CEO_EMAIL; }
-    else { recipient = document.getElementById('custom-recipient').value.trim(); }
-    var subject = document.getElementById('email-subject').value.trim();
-    var message = document.getElementById('email-message').value.trim();
-    var statusEl = document.getElementById('email-status');
-    if (!recipient) { statusEl.textContent = 'Select or enter a recipient'; statusEl.className = 'status error'; return; }
-    if (!subject) { statusEl.textContent = 'Subject required'; statusEl.className = 'status error'; return; }
-    if (!message) { statusEl.textContent = 'Message required'; statusEl.className = 'status error'; return; }
-    statusEl.textContent = 'Sending...'; statusEl.className = 'status info';
-    var footer = currentUserIsCEO ? '<br><br><hr><p style="font-size:11px;color:#a6947e">Abihani Isa<br>Founder & CEO, Abihani Nig Ltd<br>www.abihaniexpress.com.ng</p>' : '';
-    var ok = await sendEmail(recipient, subject, '<p>' + message.replace(/\n/g, '<br>') + '</p>' + footer);
-    if (ok) { statusEl.textContent = 'Email sent! ✉️'; statusEl.className = 'status success'; document.getElementById('email-subject').value = ''; document.getElementById('email-message').value = ''; }
-    else { statusEl.textContent = 'Failed to send.'; statusEl.className = 'status error'; }
-}
-
-// ============ POPUPS (CUSTOM ORDER, BOOKS, ARTISAN) ============
-function openCustomOrderPopup() {
-    document.getElementById('custom-order-popup-title').textContent = CONFIG.CUSTOM_ORDER_TITLE;
-    document.getElementById('custom-order-popup-subtitle').textContent = CONFIG.CUSTOM_ORDER_SUBTITLE;
-    var form = document.getElementById('custom-order-form'); if (!form) return;
-    var h = '';
-    for (var f = 0; f < CONFIG.CUSTOM_ORDER_FIELDS.length; f++) { var fd = CONFIG.CUSTOM_ORDER_FIELDS[f]; h += '<label style="font-size:13px;font-weight:500;margin-top:8px;display:block">' + fd.label + (fd.required ? ' *' : ' <span style="color:var(--text-muted)">(Optional)</span>') + '</label>'; if (fd.type === 'textarea') h += '<textarea name="co_' + f + '" placeholder="' + fd.placeholder + '" ' + (fd.required ? 'required' : '') + ' rows="3" style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;font-family:inherit;background:var(--bg-primary);color:var(--text-primary)"></textarea>'; else h += '<input type="' + fd.type + '" name="co_' + f + '" placeholder="' + fd.placeholder + '" ' + (fd.required ? 'required' : '') + ' style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;background:var(--bg-primary);color:var(--text-primary)">'; }
-    h += '<button type="submit" class="btn-submit-order"><i class="fab fa-whatsapp"></i> Send via WhatsApp</button>';
-    form.innerHTML = h; document.getElementById('custom-order-popup').style.display = 'flex'; document.body.style.overflow = 'hidden';
-}
-function closeCustomOrderPopup() { document.getElementById('custom-order-popup').style.display = 'none'; document.body.style.overflow = ''; }
-function submitCustomOrder(e) {
-    e.preventDefault(); var msg = '🛠️ *CUSTOM ORDER REQUEST*\n\n';
-    for (var f = 0; f < CONFIG.CUSTOM_ORDER_FIELDS.length; f++) { var val = (document.querySelector('[name="co_' + f + '"]') ? document.querySelector('[name="co_' + f + '"]').value : '').trim(); if (val) msg += '*' + CONFIG.CUSTOM_ORDER_FIELDS[f].label + ':* ' + val + '\n'; }
-    msg += '\n📅 _Sent from Abihani Express Website_';
-    window.open('https://wa.me/' + CONFIG.WHATSAPP_NUMBER.replace(/[^0-9]/g, '') + '?text=' + encodeURIComponent(msg), '_blank');
-    closeCustomOrderPopup(); showToast('Sent via WhatsApp!', 'success');
-}
-function openBookPopup(i) { var b = CONFIG.BOOKS[i]; if (!b) return; document.getElementById('book-popup-img').src = b.cover; document.getElementById('book-popup-title').textContent = b.title; document.getElementById('book-popup-author').textContent = 'by ' + b.author; document.getElementById('book-popup-price').textContent = b.price; document.getElementById('book-popup-synopsis').textContent = b.synopsis || ''; var ab = document.getElementById('book-popup-action-btn'); if (b.isFree) { ab.innerHTML = '<i class="fas fa-download"></i> Download Free PDF'; ab.className = 'btn-popup-download'; ab.href = b.pdfUrl; ab.target = '_blank'; } else { ab.innerHTML = '<i class="fab fa-whatsapp"></i> Buy via WhatsApp'; ab.className = 'btn-popup-wa'; ab.href = 'https://wa.me/' + CONFIG.WHATSAPP_NUMBER.replace(/[^0-9]/g, '') + '?text=' + encodeURIComponent(b.waMessage); ab.target = '_blank'; } document.getElementById('book-popup').style.display = 'flex'; document.body.style.overflow = 'hidden'; }
-function closeBookPopup() { document.getElementById('book-popup').style.display = 'none'; document.body.style.overflow = ''; }
-function openArtisanPopup() { var container = document.getElementById('artisan-popup-container'); if (!container) return; container.innerHTML = '<div class="book-popup-overlay" style="display:flex" id="artisan-popup-inner"><div class="book-popup-content" style="max-width:500px"><span class="book-popup-close" onclick="closeArtisanPopup()">&times;</span><div style="text-align:center"><img src="' + CONFIG.ARTISAN_IMAGE + '" style="width:100%;max-width:300px;border-radius:16px;margin-bottom:16px" alt="' + CONFIG.ARTISAN_NAME + '"><span class="artisan-badge" style="display:inline-block;margin-bottom:8px">' + CONFIG.ARTISAN_BADGE_TEXT + '</span><h3 style="color:var(--accent);margin-bottom:8px">' + CONFIG.ARTISAN_NAME + '</h3><p style="color:var(--text-secondary);font-size:13px;line-height:1.6;margin-bottom:16px">' + CONFIG.ARTISAN_FULL_STORY + '</p><a href="https://wa.me/234' + CONFIG.ARTISAN_WHATSAPP.replace(/^0/, '') + '" class="btn-popup-wa" target="_blank"><i class="fab fa-whatsapp"></i> ' + CONFIG.ARTISAN_POPUP_CONTACT_TEXT + '</a></div></div></div>'; document.body.style.overflow = 'hidden'; }
-function closeArtisanPopup() { document.getElementById('artisan-popup-container').innerHTML = ''; document.body.style.overflow = ''; }
-
-// ============ FEEDBACK ============
-async function submitFeedback() {
-    var n = document.getElementById('contact-name') ? document.getElementById('contact-name').value.trim() : 'Anonymous';
-    var e = document.getElementById('contact-email') ? document.getElementById('contact-email').value.trim() : '';
-    var m = document.getElementById('contact-message') ? document.getElementById('contact-message').value.trim() : '';
-    if (!m) { showToast('Please enter a message', 'error'); return; }
-    var btn = document.getElementById('feedback-send-btn'); setBtnLoading(btn, 'Sending...');
-    await supabase.from('feedback').insert({ name: n || 'Anonymous', message: m });
-    var emailBody = '<p><strong>Name:</strong> ' + (n || 'Anonymous') + '</p>';
-    if (e) emailBody += '<p><strong>Email:</strong> ' + e + '</p>';
-    emailBody += '<p><strong>Message:</strong></p><p>' + m.replace(/\n/g, '<br>') + '</p>';
-    sendEmail(CONFIG.CEO_EMAIL, '📬 New Feedback from ' + (n || 'Anonymous'), emailBody);
-    resetBtn(btn, 'Send feedback');
-    document.getElementById('contact-name').value = ''; if (document.getElementById('contact-email')) document.getElementById('contact-email').value = ''; document.getElementById('contact-message').value = '';
-    showToast('Feedback sent! Thank you! 📬', 'success');
-}
-
-// ============ SESSION CHECK ============
-(async function() {
-    var session = await supabase.auth.getSession();
-    if (session.data && session.data.session) {
-        var email = session.data.session.user.email;
-        if (CONFIG.ADMIN_CEO_EMAILS.indexOf(email) !== -1) { isAdminLoggedIn = true; currentUserEmail = email; currentUserRole = 'Owner'; currentUserIsCEO = true; saveSession(); }
-    }
-})();
-
-// ============ CONFIRM DELETE (STYLED POPUP) ============
-function confirmDelete(msg, callback) {
-    showHaniPopup(CONFIG.UI_DELETE_CONFIRM_TITLE, msg, [
-        { text: CONFIG.UI_DELETE_CONFIRM_YES, primary: true, action: function() { closeHaniPopup(); if (callback) callback(); } },
-        { text: CONFIG.UI_DELETE_CONFIRM_NO, primary: false, action: closeHaniPopup }
-    ], 'error');
-}
-
-// ============ FINAL EXPOSE ============
-window.renderAdminPanels = renderAdminPanels;
-window.renderAdminRequests = renderAdminRequests;
-window.loadRequestTab = loadRequestTab;
-window.approveApp = approveApp; window.rejectApp = rejectApp; window.deleteRejectedApp = deleteRejectedApp;
-window.renderPartners = renderPartners;
-window.viewAdminDashboard = viewAdminDashboard;
-window.freezeAdmin = freezeAdmin; window.unfreezeAdmin = unfreezeAdmin; window.deleteAdminCompletely = deleteAdminCompletely;
-window.renderSettings = renderSettings; window.saveAdminSettings = saveAdminSettings; window.saveCEOSettings = saveCEOSettings;
-window.saveAnnouncement = saveAnnouncement;
-window.renderAllProductsAdmin = renderAllProductsAdmin;
-window.renderCategoriesListAdmin = renderCategoriesListAdmin;
-window.renderSubcategoriesAdmin = renderSubcategoriesAdmin;
-window.renderSubProductsAdmin = renderSubProductsAdmin;
-window.showAddProductForm = showAddProductForm; window.addAddSidePicker = addAddSidePicker;
-window.saveNewProduct = saveNewProduct;
-window.renderEditProduct = renderEditProduct; window.addSidePicker = addSidePicker;
-window.removeSideRow = removeSideRow;
-window.saveEditProduct = saveEditProduct; window.deleteProductConfirm = deleteProductConfirm;
-window.showAddCategoryForm = showAddCategoryForm; window.saveNewCategory = saveNewCategory;
-window.editCategory = editCategory; window.saveEditCategory = saveEditCategory;
-window.deleteCategory = deleteCategory;
-window.moveCatUp = moveCatUp; window.moveCatDown = moveCatDown;
-window.renderAddSubcategory = renderAddSubcategory; window.saveNewSubcategory = saveNewSubcategory;
-window.editSubcategory = editSubcategory; window.saveEditSubcategory = saveEditSubcategory;
-window.deleteSubcategory = deleteSubcategory;
-window.renderEmailCenter = renderEmailCenter; window.switchEmailTab = switchEmailTab;
-window.filterPartnerDropdown = filterPartnerDropdown; window.selectPartner = selectPartner;
-window.sendCustomEmail = sendCustomEmail;
-window.openCustomOrderPopup = openCustomOrderPopup; window.closeCustomOrderPopup = closeCustomOrderPopup;
-window.submitCustomOrder = submitCustomOrder;
-window.openBookPopup = openBookPopup; window.closeBookPopup = closeBookPopup;
-window.openArtisanPopup = openArtisanPopup; window.closeArtisanPopup = closeArtisanPopup;
-window.submitFeedback = submitFeedback;
-
-// ============================================
-// END — ABIHANI EXPRESS v18 🌸
-// ============================================
+    if (!confirm('Delete "' + name + '" permanently?')) return;
+    await supabase.from('product
