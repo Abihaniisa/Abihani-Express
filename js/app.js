@@ -41,22 +41,40 @@ function showToast(msg, type) {
 }
 
 // ============ INIT ============
+// ============ INIT ============
 (function init() {
-    var path = window.location.pathname.replace(/\//g, '') || 'home';
-// --- FIX START: handle product-detail query params on direct load ---
-if (path === 'product-detail') {
+    // Determine the initial path from the URL
+    var rawPath = window.location.pathname.replace(/^\/+|\/+$/g, '');
+    var initialPage = rawPath || 'home';
+
+    // Parse query parameters for product-detail
     var params = new URLSearchParams(window.location.search);
-    var id = params.get('id');
-    if (id) {
-        // Call immediately after DOM is ready, but ensure init finishes first.
-        setTimeout(function() { showProductDetail(id, 'shop'); }, 100);
+    var productId = params.get('id');
+
+    // Reset the history stack with a clean slate
+    pageHistoryStack = [initialPage];
+    
+    // Override the browser's initial history state to our app state
+    var stateObj = { page: initialPage, isAppPage: true };
+    var url = '/' + (initialPage === 'home' ? '' : initialPage);
+    if (initialPage === 'product-detail' && productId) {
+        url += '?id=' + encodeURIComponent(productId);
     }
-}
-// --- FIX END ---
-    if (path === 'index.html') path = 'home';
-    pageHistoryStack = [path];
-    history.replaceState({ page: path, isAppPage: true }, '', '/' + (path === 'home' ? '' : path));
+    history.replaceState(stateObj, '', url);
+
+    // Check session before rendering
     checkSession();
+
+    // If it's a direct product-detail link, handle it immediately
+    if (initialPage === 'product-detail' && productId) {
+        // We need to delay slightly to let loadDynamicData() populate allProducts
+        setTimeout(function() {
+            showProductDetail(productId, 'shop');
+        }, 200);
+    } else {
+        // Render the page normally
+        showPage(initialPage, false); // false = don't push to history again
+    }
 })();
 
 (function instantStatic() {
@@ -354,12 +372,26 @@ testimonialInterval = setInterval(rotateTestimonial, 5000);
 // ============ NAVIGATION (Clean URLs - No Hash) ============
 var validAppPages = ['home','shop','search','about','contact','profile','admin-login','admin-dashboard','product-detail','terms','privacy'];
 
+// ============ NAVIGATION (Clean URLs - No Hash) ============
+var validAppPages = ['home','shop','search','about','contact','profile','admin-login','admin-dashboard','product-detail','terms','privacy'];
+
 function navigateTo(pageName, addToHistory) {
     if (addToHistory === undefined) addToHistory = true;
     if (pageName === 'profile' && isAdminLoggedIn) { pageName = 'admin-dashboard'; }
     if (pageName === 'admin-dashboard' && !isAdminLoggedIn) { pageName = 'profile'; }
-    if (pageName === 'admin-dashboard') { showPage('admin-dashboard'); renderAdminPanels(); pushToHistory('admin-dashboard'); resetInactivityTimer(); return; }
-    if (pageName === 'product-detail') return;
+    
+    // Handle Admin Dashboard - DO NOT inject spinner HTML here. Let renderAdminPanels handle it.
+    if (pageName === 'admin-dashboard') {
+        showPage('admin-dashboard');
+        // Use a tiny delay to ensure DOM is ready, then render
+        setTimeout(function() { renderAdminPanels(); }, 50);
+        if (addToHistory && pageName !== pageHistoryStack[pageHistoryStack.length - 1]) pushToHistory(pageName);
+        resetInactivityTimer();
+        return;
+    }
+    
+    if (pageName === 'product-detail') return; // Prevent direct navigation without ID
+    
     showPage(pageName);
     if (addToHistory && pageName !== pageHistoryStack[pageHistoryStack.length - 1]) pushToHistory(pageName);
     if (isAdminLoggedIn) resetInactivityTimer();
@@ -652,10 +684,17 @@ function updateCategoriesHome() { var c = document.getElementById('categories-ho
 function updateShopCategories() { var c = document.getElementById('shop-categories-filter'); if (!c) return; c.innerHTML = '<div class="category-pill active" onclick="filterAllProducts()">All</div>' + allCategories.map(function(cat) { return '<div class="category-pill" onclick="filterByCategory(\'' + cat.id + '\')">' + (cat.emoji || '') + ' ' + cat.name + '</div>'; }).join(''); }
 
 function buyNow(id) {
-    var p = allProducts.find(function(x) { return x.id == id; }); if (!p) return;
+    var p = allProducts.find(function(x) { return x.id == id; }); 
+    if (!p) return;
     if (p.is_mock) { showToast('This is a mock product for display', 'info'); return; }
+    
     var whatsapp = p.owner_whatsapp || CONFIG.WHATSAPP_NUMBER;
-    window.open('https://wa.me/' + whatsapp.replace(/[^0-9]/g, '') + '?text=Hello! I want: ' + encodeURIComponent(p.name) + ' (₦' + p.price + ')', '_blank');
+    var productLink = window.location.origin + '/product-detail?id=' + encodeURIComponent(id);
+    
+    // Using double newlines at the end forces cursor to the bottom in many mobile apps
+    var message = 'Hello! I want: ' + p.name + ' (₦' + p.price + ')\n\nProduct:\n' + productLink + '\n\n';
+    
+    window.open('https://wa.me/' + whatsapp.replace(/[^0-9]/g, '') + '?text=' + encodeURIComponent(message), '_blank');
 }
 function showExpiryWarning(expiryDate) { showToast('Your partnership expires on ' + expiryDate.toLocaleDateString() + '. Contact CEO to renew.', 'info'); }
 async function checkUnreadMessages(email) {
@@ -705,6 +744,12 @@ window.closePWAInstall = closePWAInstall; window.installPWA = installPWA;
 window.toggleHaniVisibility = toggleHaniVisibility;
 // ============ ADMIN DASHBOARD ============
 async function renderAdminPanels() {
+    // Safety check: if session or email is missing, redirect back to login
+    if (!isAdminLoggedIn || !currentUserEmail) {
+        navigateTo('profile', false);
+        return;
+    }
+    
     await loadDynamicData();
     var isCEO = currentUserIsCEO;
     var ownerFilter = viewingAdminEmail || currentUserEmail;
