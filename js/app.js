@@ -46,34 +46,142 @@ function showToast(msg, type) {
     var initialPage = rawPath || 'home';
     var params = new URLSearchParams(window.location.search);
     var productId = params.get('id');
+
+    // 1. Set the browser's initial history state to the exact URL
     var stateObj = { page: initialPage, isAppPage: true };
     var url = '/' + (initialPage === 'home' ? '' : initialPage);
     if (initialPage === 'product-detail' && productId) {
         url += '?id=' + encodeURIComponent(productId);
     }
     history.replaceState(stateObj, '', url);
+
+    // 2. Reset history stack and check session
+    pageHistoryStack = [initialPage];
     checkSession();
-    var initialProductId = productId;
-    var initialPageName = initialPage;
-    showPage(initialPageName, false);
-    loadDynamicData().then(function() {
-        if (initialPageName === 'product-detail' && initialProductId) {
-            setTimeout(function() {
-                var p = allProducts.find(function(x) { return x.id == initialProductId; });
-                if (p) {
-                    showProductDetail(initialProductId, 'shop');
-                } else {
-                    navigateTo('home');
-                }
-            }, 100);
-        }
-    });
+
+    // 3. Render Static Config Data Immediately
+    document.getElementById('announcement-text').textContent = CONFIG.UI_ANNOUNCEMENT_DEFAULT;
+    document.getElementById('nigeria-badge-display').textContent = CONFIG.NIGERIA_BADGE_TEXT;
+    document.getElementById('eco-heading-display').textContent = CONFIG.ECO_HEADING;
+    document.getElementById('eco-text-display').textContent = CONFIG.ECO_TEXT;
+    document.getElementById('ceo-bio-display').textContent = CONFIG.CEO_BIO;
+    document.getElementById('mission-display').textContent = CONFIG.OUR_MISSION;
+    document.getElementById('shop-ceo-bio-display').textContent = CONFIG.CEO_BIO;
+    document.getElementById('shop-mission-display').textContent = CONFIG.OUR_MISSION;
+    document.getElementById('about-who-display').textContent = CONFIG.WHO_WE_ARE;
+    document.getElementById('about-mission-display').textContent = CONFIG.OUR_MISSION;
+    document.getElementById('about-ceo-display').textContent = CONFIG.CEO_BIO;
+    var th = document.querySelector('#testimonials-section h3');
+    if (th) th.textContent = CONFIG.TESTIMONIALS_HEADING;
+    document.getElementById('about-logo-title').textContent = CONFIG.UI_ABOUT_LOGO_TITLE;
+    document.getElementById('about-logo-text').textContent = CONFIG.UI_ABOUT_LOGO_TEXT;
+    document.getElementById('about-logo-img').src = CONFIG.LOGO_URL;
+    document.getElementById('ceo-image-display').src = CONFIG.CEO_IMAGE;
+    document.getElementById('shop-ceo-img').src = CONFIG.CEO_IMAGE;
+    document.getElementById('about-ceo-img').src = CONFIG.CEO_IMAGE;
+    document.getElementById('ceo-wa-btn').href = 'https://wa.me/' + CONFIG.CEO_WHATSAPP.replace(/[^0-9]/g, '');
+    document.getElementById('ceo-email-btn').href = 'mailto:' + CONFIG.CEO_EMAIL;
+    document.getElementById('search-input').placeholder = CONFIG.UI_SEARCH_PLACEHOLDER;
+    document.getElementById('trust-badges-container').innerHTML = CONFIG.TRUST_BADGES.map(function(b) { return '<div class="trust-item"><i class="fas ' + b.icon + '"></i><span>' + b.text + '</span></div>'; }).join('');
+    document.getElementById('sustain-badges-container').innerHTML = CONFIG.SUSTAIN_BADGES.map(function(b) { return '<span><i class="fas ' + b.icon + '"></i> ' + b.text + '</span>'; }).join('');
+    document.getElementById('artisan-section-container').innerHTML = '<div class="artisan-section"><div class="artisan-image"><img src="' + CONFIG.ARTISAN_IMAGE + '" alt="Artisan" loading="lazy"></div><div class="artisan-content"><span class="artisan-badge">' + CONFIG.ARTISAN_BADGE_TEXT + '</span><h3>' + CONFIG.ARTISAN_NAME + '</h3><p>' + CONFIG.ARTISAN_SHORT_STORY + '</p><button class="btn-secondary" onclick="openArtisanPopup()">' + CONFIG.ARTISAN_LEARN_MORE_BUTTON + '</button></div></div>';
+    document.getElementById('profile-heading').textContent = CONFIG.UI_PROFILE_HEADING;
+    document.getElementById('profile-subheading').textContent = CONFIG.UI_PROFILE_SUBHEADING;
+    document.getElementById('profile-login-btn').textContent = CONFIG.UI_PROFILE_LOGIN_BTN;
+    document.getElementById('profile-no-account').textContent = CONFIG.UI_PROFILE_NO_ACCOUNT;
+    document.getElementById('profile-apply-btn').textContent = CONFIG.UI_PROFILE_APPLY_BTN;
+    document.getElementById('profile-price-note').textContent = CONFIG.UI_PROFILE_PRICE_NOTE;
+    var abtH3 = document.querySelector('#about-page .section-title h3');
+    if (abtH3) abtH3.textContent = CONFIG.BOOKS_SECTION_TITLE;
+    document.getElementById('social-links').innerHTML = '<a href="https://wa.me/' + CONFIG.WHATSAPP_NUMBER.replace(/[^0-9]/g, '') + '" target="_blank" rel="noopener"><i class="fab fa-whatsapp"></i></a><a href="' + CONFIG.FACEBOOK_URL + '" target="_blank" rel="noopener"><i class="fab fa-facebook"></i></a><a href="' + CONFIG.INSTAGRAM_URL + '" target="_blank" rel="noopener"><i class="fab fa-instagram"></i></a><a href="' + CONFIG.TWITTER_URL + '" target="_blank" rel="noopener"><i class="fab fa-twitter"></i></a>';
+    document.getElementById('books-container').innerHTML = CONFIG.BOOKS.map(function(b, i) { return '<div class="book-card" onclick="openBookPopup(' + i + ')"><div class="book-image"><img src="' + b.cover + '" alt="' + b.title + '" loading="lazy"></div><div class="book-info"><h4>' + b.title + '</h4><p class="book-author">by ' + b.author + '</p><p class="book-price">' + b.price + '</p>' + (b.isFree ? '<span class="btn-book-download" onclick="event.stopPropagation();window.open(\'' + b.pdfUrl + '\',\'_blank\')"><i class="fas fa-download"></i> Download PDF</span>' : '<span class="btn-book-buy" onclick="event.stopPropagation();openBookPopup(' + i + ')"><i class="fab fa-whatsapp"></i> Preview & Buy</span>') + '</div></div>'; }).join('');
+    document.getElementById('terms-content').innerHTML = '<h4>' + CONFIG.TERMS_TITLE + '</h4>' + CONFIG.TERMS_TEXT;
+    document.getElementById('privacy-content').innerHTML = '<h4>' + CONFIG.PRIVACY_TITLE + '</h4>' + CONFIG.PRIVACY_TEXT;
+    document.getElementById('hani-popup-avatar').src = CONFIG.HANI_IMAGE;
+    document.getElementById('hani-tour-avatar').src = CONFIG.HANI_IMAGE;
+    document.getElementById('hani-char-img').src = CONFIG.HANI_IMAGE;
+    document.getElementById('pwa-install-avatar').src = CONFIG.HANI_IMAGE;
+    renderHeroSlider();
+    renderTestimonials();
+    showAllSkeletons();
+    updateNav();
+    initPWA();
+    initHaniCharacter();
+    checkFirstVisit();
+
+    // 4. Handle Page Routing Safely (Prevent History Breakage)
+    if (initialPage === 'product-detail' && productId) {
+        showPage('product-detail', false);
+        loadDynamicData().then(function() {
+            var p = allProducts.find(function(x) { return x.id == productId; });
+            if (p) {
+                showProductDetail(productId, 'shop', true);
+            } else {
+                navigateTo('shop', false);
+            }
+        });
+    } else {
+        showPage(initialPage, false);
+        loadDynamicData();
+    }
+})();
+
     initPWA();
     initHaniCharacter();
     checkFirstVisit();
 })();
 
-
+(function instantStatic() {
+    document.getElementById('announcement-text').textContent = CONFIG.UI_ANNOUNCEMENT_DEFAULT;
+    document.getElementById('nigeria-badge-display').textContent = CONFIG.NIGERIA_BADGE_TEXT;
+    document.getElementById('eco-heading-display').textContent = CONFIG.ECO_HEADING;
+    document.getElementById('eco-text-display').textContent = CONFIG.ECO_TEXT;
+    document.getElementById('ceo-bio-display').textContent = CONFIG.CEO_BIO;
+    document.getElementById('mission-display').textContent = CONFIG.OUR_MISSION;
+    document.getElementById('shop-ceo-bio-display').textContent = CONFIG.CEO_BIO;
+    document.getElementById('shop-mission-display').textContent = CONFIG.OUR_MISSION;
+    document.getElementById('about-who-display').textContent = CONFIG.WHO_WE_ARE;
+    document.getElementById('about-mission-display').textContent = CONFIG.OUR_MISSION;
+    document.getElementById('about-ceo-display').textContent = CONFIG.CEO_BIO;
+    var th = document.querySelector('#testimonials-section h3');
+    if (th) th.textContent = CONFIG.TESTIMONIALS_HEADING;
+    document.getElementById('about-logo-title').textContent = CONFIG.UI_ABOUT_LOGO_TITLE;
+    document.getElementById('about-logo-text').textContent = CONFIG.UI_ABOUT_LOGO_TEXT;
+    document.getElementById('about-logo-img').src = CONFIG.LOGO_URL;
+    document.getElementById('ceo-image-display').src = CONFIG.CEO_IMAGE;
+    document.getElementById('shop-ceo-img').src = CONFIG.CEO_IMAGE;
+    document.getElementById('about-ceo-img').src = CONFIG.CEO_IMAGE;
+    document.getElementById('ceo-wa-btn').href = 'https://wa.me/' + CONFIG.CEO_WHATSAPP.replace(/[^0-9]/g, '');
+    document.getElementById('ceo-email-btn').href = 'mailto:' + CONFIG.CEO_EMAIL;
+    document.getElementById('search-input').placeholder = CONFIG.UI_SEARCH_PLACEHOLDER;
+    document.getElementById('trust-badges-container').innerHTML = CONFIG.TRUST_BADGES.map(function(b) { return '<div class="trust-item"><i class="fas ' + b.icon + '"></i><span>' + b.text + '</span></div>'; }).join('');
+    document.getElementById('sustain-badges-container').innerHTML = CONFIG.SUSTAIN_BADGES.map(function(b) { return '<span><i class="fas ' + b.icon + '"></i> ' + b.text + '</span>'; }).join('');
+    document.getElementById('artisan-section-container').innerHTML = '<div class="artisan-section"><div class="artisan-image"><img src="' + CONFIG.ARTISAN_IMAGE + '" alt="Artisan" loading="lazy"></div><div class="artisan-content"><span class="artisan-badge">' + CONFIG.ARTISAN_BADGE_TEXT + '</span><h3>' + CONFIG.ARTISAN_NAME + '</h3><p>' + CONFIG.ARTISAN_SHORT_STORY + '</p><button class="btn-secondary" onclick="openArtisanPopup()">' + CONFIG.ARTISAN_LEARN_MORE_BUTTON + '</button></div></div>';
+    document.getElementById('profile-heading').textContent = CONFIG.UI_PROFILE_HEADING;
+    document.getElementById('profile-subheading').textContent = CONFIG.UI_PROFILE_SUBHEADING;
+    document.getElementById('profile-login-btn').textContent = CONFIG.UI_PROFILE_LOGIN_BTN;
+    document.getElementById('profile-no-account').textContent = CONFIG.UI_PROFILE_NO_ACCOUNT;
+    document.getElementById('profile-apply-btn').textContent = CONFIG.UI_PROFILE_APPLY_BTN;
+    document.getElementById('profile-price-note').textContent = CONFIG.UI_PROFILE_PRICE_NOTE;
+    var abtH3 = document.querySelector('#about-page .section-title h3');
+    if (abtH3) abtH3.textContent = CONFIG.BOOKS_SECTION_TITLE;
+    document.getElementById('social-links').innerHTML = '<a href="https://wa.me/' + CONFIG.WHATSAPP_NUMBER.replace(/[^0-9]/g, '') + '" target="_blank" rel="noopener"><i class="fab fa-whatsapp"></i></a><a href="' + CONFIG.FACEBOOK_URL + '" target="_blank" rel="noopener"><i class="fab fa-facebook"></i></a><a href="' + CONFIG.INSTAGRAM_URL + '" target="_blank" rel="noopener"><i class="fab fa-instagram"></i></a><a href="' + CONFIG.TWITTER_URL + '" target="_blank" rel="noopener"><i class="fab fa-twitter"></i></a>';
+    document.getElementById('books-container').innerHTML = CONFIG.BOOKS.map(function(b, i) { return '<div class="book-card" onclick="openBookPopup(' + i + ')"><div class="book-image"><img src="' + b.cover + '" alt="' + b.title + '" loading="lazy"></div><div class="book-info"><h4>' + b.title + '</h4><p class="book-author">by ' + b.author + '</p><p class="book-price">' + b.price + '</p>' + (b.isFree ? '<span class="btn-book-download" onclick="event.stopPropagation();window.open(\'' + b.pdfUrl + '\',\'_blank\')"><i class="fas fa-download"></i> Download PDF</span>' : '<span class="btn-book-buy" onclick="event.stopPropagation();openBookPopup(' + i + ')"><i class="fab fa-whatsapp"></i> Preview & Buy</span>') + '</div></div>'; }).join('');
+    document.getElementById('terms-content').innerHTML = '<h4>' + CONFIG.TERMS_TITLE + '</h4>' + CONFIG.TERMS_TEXT;
+    document.getElementById('privacy-content').innerHTML = '<h4>' + CONFIG.PRIVACY_TITLE + '</h4>' + CONFIG.PRIVACY_TEXT;
+    document.getElementById('hani-popup-avatar').src = CONFIG.HANI_IMAGE;
+    document.getElementById('hani-tour-avatar').src = CONFIG.HANI_IMAGE;
+    document.getElementById('hani-char-img').src = CONFIG.HANI_IMAGE;
+    document.getElementById('pwa-install-avatar').src = CONFIG.HANI_IMAGE;
+    renderHeroSlider();
+    renderTestimonials();
+    showAllSkeletons();
+    updateNav();
+    loadDynamicData();
+    initPWA();
+    initHaniCharacter();
+    checkFirstVisit();
+})();
 
 // ============ SESSION ============
 function checkSession() {
@@ -491,15 +599,23 @@ function showProductDetail(id, source) {
     if (source) detailSource = source;
     var p = allProducts.find(function(x) { return x.id == id; }); if (!p) return;
     currentDetailProduct = p;
-    var imgForMeta = p.image_url || 'https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/social-share.jpg';
+    // --- FIX FOR SOCIAL SHARING IMAGES (TEMU STYLE) ---
+var imgForMeta = p.image_url || 'https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/social-share.jpg';
 var descForMeta = p.description || 'Premium handcrafted leather goods.';
 var titleForMeta = p.name + ' · Abihani Express';
-document.getElementById('og-title').content = titleForMeta;
-document.getElementById('og-description').content = descForMeta;
-document.getElementById('og-image').content = imgForMeta;
-document.getElementById('tw-title').content = titleForMeta;
-document.getElementById('tw-description').content = descForMeta;
-document.getElementById('tw-image').content = imgForMeta;
+
+// Only update the meta tags if the scraper didn't already pre-fill them via the <noscript> fetch above
+var ogImg = document.getElementById('og-image');
+if (ogImg && !ogImg.hasAttribute('data-skip-scraper')) {
+    document.getElementById('og-title').content = titleForMeta;
+    document.getElementById('og-description').content = descForMeta;
+    document.getElementById('og-image').content = imgForMeta;
+    document.getElementById('tw-title').content = titleForMeta;
+    document.getElementById('tw-description').content = descForMeta;
+    document.getElementById('tw-image').content = imgForMeta;
+}
+
+// --- END SHARING FIX ---
     var imgs = []; try { imgs = JSON.parse(p.image_urls || '[]'); } catch(e) {} if (p.image_url) imgs.unshift(p.image_url);
     currentDetailImages = imgs; currentDetailIndex = 0;
     var mainImg = imgs.length ? imgs[0] : '';
