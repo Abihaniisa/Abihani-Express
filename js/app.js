@@ -41,40 +41,36 @@ function showToast(msg, type) {
 }
 
 // ============ INIT ============
-// ============ INIT ============
 (function init() {
-    // Determine the initial path from the URL
     var rawPath = window.location.pathname.replace(/^\/+|\/+$/g, '');
     var initialPage = rawPath || 'home';
-
-    // Parse query parameters for product-detail
     var params = new URLSearchParams(window.location.search);
     var productId = params.get('id');
-
-    // Reset the history stack with a clean slate
-    pageHistoryStack = [initialPage];
-    
-    // Override the browser's initial history state to our app state
     var stateObj = { page: initialPage, isAppPage: true };
     var url = '/' + (initialPage === 'home' ? '' : initialPage);
     if (initialPage === 'product-detail' && productId) {
         url += '?id=' + encodeURIComponent(productId);
     }
     history.replaceState(stateObj, '', url);
-
-    // Check session before rendering
     checkSession();
-
-    // If it's a direct product-detail link, handle it immediately
-    if (initialPage === 'product-detail' && productId) {
-        // We need to delay slightly to let loadDynamicData() populate allProducts
-        setTimeout(function() {
-            showProductDetail(productId, 'shop');
-        }, 200);
-    } else {
-        // Render the page normally
-        showPage(initialPage, false); // false = don't push to history again
-    }
+    var initialProductId = productId;
+    var initialPageName = initialPage;
+    showPage(initialPageName, false);
+    loadDynamicData().then(function() {
+        if (initialPageName === 'product-detail' && initialProductId) {
+            setTimeout(function() {
+                var p = allProducts.find(function(x) { return x.id == initialProductId; });
+                if (p) {
+                    showProductDetail(initialProductId, 'shop');
+                } else {
+                    navigateTo('home');
+                }
+            }, 100);
+        }
+    });
+    initPWA();
+    initHaniCharacter();
+    checkFirstVisit();
 })();
 
 (function instantStatic() {
@@ -423,25 +419,65 @@ function showPage(pageName) {
     var target = document.getElementById(map[pageName]); if (target) target.classList.add('active-page');
     if (pageName === 'shop') renderAllProducts();
     if (pageName === 'search') { var sr = document.getElementById('search-results'); if (sr) sr.innerHTML = ''; var si = document.getElementById('search-input'); if (si) si.value = ''; }
-    updateNav(); updatePageHistory(pageName);
+    updateNav(pageName); updatePageHistory(pageName);
 }
-function updatePageHistory(page) { if (pageHistoryStack[pageHistoryStack.length - 1] !== page) pageHistoryStack.push(page); }
-function updateNav() {
-    var path = window.location.pathname.replace(/\//g, '') || 'home';
-    var nm = { home: 'nav-home', shop: 'nav-shop', search: 'nav-search', profile: 'nav-profile', about: 'nav-home', contact: 'nav-home', terms: 'nav-home', privacy: 'nav-home', 'admin-login': 'nav-profile', 'admin-dashboard': 'nav-profile', 'product-detail': 'nav-shop' };
+function updatePageHistory(page) { 
+    if (pageHistoryStack.length === 0 || pageHistoryStack[pageHistoryStack.length - 1] !== page) {
+        pageHistoryStack.push(page);
+    }
+}
+function updateNav(page) {
+    if (!page) {
+        var activePage = document.querySelector('.page-section.active-page');
+        if (activePage) {
+            var map = {
+                'home-page': 'home', 'shop-page': 'shop', 'search-page': 'search',
+                'about-page': 'about', 'contact-page': 'contact', 'terms-page': 'terms',
+                'privacy-page': 'privacy', 'profile-page': 'profile',
+                'admin-login-page': 'admin-login', 'admin-dashboard-page': 'admin-dashboard',
+                'product-detail-page': 'product-detail'
+            };
+            page = map[activePage.id] || 'home';
+        } else {
+            page = 'home';
+        }
+    }
     document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
-    var tid = nm[path] || 'nav-home'; var an = document.getElementById(tid); if (an) an.classList.add('active');
+    var nm = { home: 'nav-home', shop: 'nav-shop', search: 'nav-search', profile: 'nav-profile', about: 'nav-home', contact: 'nav-home', terms: 'nav-home', privacy: 'nav-home', 'admin-login': 'nav-profile', 'admin-dashboard': 'nav-profile', 'product-detail': 'nav-shop' };
+    var tid = nm[page] || 'nav-home'; 
+    var an = document.getElementById(tid); 
+    if (an) an.classList.add('active');
     document.querySelectorAll('.desktop-nav a').forEach(function(a) { a.classList.remove('active'); });
-    var da = document.querySelector('.desktop-nav a[data-page="' + path + '"]'); if (da) da.classList.add('active');
+    var da = document.querySelector('.desktop-nav a[data-page="' + page + '"]'); 
+    if (da) da.classList.add('active');
 }
 window.addEventListener('popstate', function(e) {
     var state = e.state;
-    if (!state || !state.isAppPage) { navigateTo('home', false); return; }
+    if (!state || !state.isAppPage) { 
+        navigateTo('home', false); 
+        return; 
+    }
     var path = state.page || 'home';
-    pageHistoryStack = pageHistoryStack.filter(function(p) { return p !== path; });
-    pageHistoryStack.push(path);
-    if (validAppPages.indexOf(path) === -1) { navigateTo('home', false); return; }
-    if (path === 'product-detail') { navigateTo('shop', false); } else showPage(path);
+    if (validAppPages.indexOf(path) === -1) { 
+        navigateTo('home', false); 
+        return; 
+    }
+    if (pageHistoryStack.length > 0 && pageHistoryStack[pageHistoryStack.length - 1] !== path) {
+        pageHistoryStack.push(path);
+    } else if (pageHistoryStack.length === 0) {
+        pageHistoryStack.push(path);
+    }
+    if (path === 'product-detail') {
+        var params = new URLSearchParams(window.location.search);
+        var id = params.get('id');
+        if (id && allProducts.length > 0) {
+            showProductDetail(id, 'shop');
+        } else {
+            navigateTo('shop', false);
+        }
+    } else {
+        showPage(path);
+    }
 });
 var initPath = window.location.pathname.replace(/\//g, '') || 'home';
 (function() { pageHistoryStack = [initPath]; showPage(initPath); })();
@@ -505,6 +541,15 @@ function showProductDetail(id, source) {
     if (source) detailSource = source;
     var p = allProducts.find(function(x) { return x.id == id; }); if (!p) return;
     currentDetailProduct = p;
+    var imgForMeta = p.image_url || 'https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/social-share.jpg';
+var descForMeta = p.description || 'Premium handcrafted leather goods.';
+var titleForMeta = p.name + ' · Abihani Express';
+document.getElementById('og-title').content = titleForMeta;
+document.getElementById('og-description').content = descForMeta;
+document.getElementById('og-image').content = imgForMeta;
+document.getElementById('tw-title').content = titleForMeta;
+document.getElementById('tw-description').content = descForMeta;
+document.getElementById('tw-image').content = imgForMeta;
     var imgs = []; try { imgs = JSON.parse(p.image_urls || '[]'); } catch(e) {} if (p.image_url) imgs.unshift(p.image_url);
     currentDetailImages = imgs; currentDetailIndex = 0;
     var mainImg = imgs.length ? imgs[0] : '';
