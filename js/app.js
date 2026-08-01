@@ -402,7 +402,7 @@ function generateMockData(count) {
     for (var j = 0; j < CONFIG.MOCK_DATA_SUBCATEGORIES.length; j++) { var sub = CONFIG.MOCK_DATA_SUBCATEGORIES[j]; mockSubcategories.push({ id: 'mock-sub-' + j, name: sub.name, category_id: 'mock-cat-' + sub.categoryIndex, owner_email: 'mock', is_mock: true }); }
     for (var k = 0; k < count; k++) {
         var rsi = Math.floor(Math.random() * mockSubcategories.length), rs = mockSubcategories[rsi], rni = Math.floor(Math.random() * CONFIG.MOCK_PRODUCT_NAMES.length), rii = Math.floor(Math.random() * CONFIG.MOCK_DATA_ICONS.length);
-        mockProducts.push({ id: 'mock-prod-' + k, name: CONFIG.MOCK_PRODUCT_NAMES[rni], price: Math.floor(Math.random() * 95000) + 5000, category_id: rs.category_id, subcategory_id: rs.id, description: 'Mock product for display.', image_url: '', image_urls: '[]', image_icon: CONFIG.MOCK_DATA_ICONS[rii], rating: parseFloat((Math.random() * 2 + 3).toFixed(1)), review_count: Math.floor(Math.random() * 235) + 12, stock_quantity: Math.floor(Math.random() * 50) + 1, discount_percent: Math.random() < 0.3 ? Math.floor(Math.random() * 40) + 5 : 0, vendor: CONFIG.PRODUCT_DEFAULT_VENDOR, location: CONFIG.PRODUCT_DEFAULT_LOCATION, featured: Math.random() < (CONFIG.MOCK_DATA_FEATURE_PERCENT / 100), featured_order: 0, owner_email: 'mock', owner_whatsapp: CONFIG.WHATSAPP_NUMBER, is_mock: true });
+        mockProducts.push({ id: 'mock-prod-' + k, name: CONFIG.MOCK_PRODUCT_NAMES[rni], price: Math.floor(Math.random() * 95000) + 5000, category_id: rs.category_id, subcategory_id: rs.id, description: 'Mock product for display.', image_url: '', image_urls: '[]', image_icon: CONFIG.MOCK_DATA_ICONS[rii], rating: parseFloat((Math.random() * 2 + 3).toFixed(1)), review_count: Math.floor(Math.random() * 235) + 12, stock_quantity: Math.floor(Math.random() * 50) + 1, discount_percent: Math.random() < 0.3 ? Math.floor(Math.random() * 40) + 5 : 0, vendor: CONFIG.PRODUCT_DEFAULT_VENDOR, location: CONFIG.PRODUCT_DEFAULT_LOCATION, featured: Math.random() < (CONFIG.MOCK_DATA_FEATURE_PERCENT / 100), owner_email: 'mock', owner_whatsapp: CONFIG.WHATSAPP_NUMBER, is_mock: true });
     }
 }
 function mergeMockData() {
@@ -644,12 +644,12 @@ function productCardHTML(p) {
     return '<div class="product-card" onclick="showProductDetail(\'' + p.id + '\', \'shop\')"><div class="product-image">' + imgHtml + '</div><div class="product-info"><h4>' + (p.name || '') + '</h4>' + priceHtml + '<div class="product-rating">' + stars + ' (' + rc + ')</div><div class="product-vendor"><i class="fas fa-store"></i> ' + (p.vendor || CONFIG.PRODUCT_DEFAULT_VENDOR) + '</div><button class="btn-wa-small" onclick="event.stopPropagation();buyNow(\'' + p.id + '\')"><i class="fab fa-whatsapp"></i> ' + CONFIG.UI_BUY_NOW + '</button></div></div>';
 }
 
-// ============ FEATURED PRODUCTS - HORIZONTAL SCROLL LIST (NO CAROUSEL) ============
+// ============ FEATURED PRODUCTS - HORIZONTAL SCROLL (NO CAROUSEL) ============
 function updateFeaturedProducts() {
     var container = document.getElementById('featured-products');
     if (!container) return;
 
-    // Get featured products and sort by featured_order
+    // Get featured products
     var featured = allProducts.filter(function(p) { return p.featured; });
 
     if (featured.length === 0) {
@@ -657,28 +657,16 @@ function updateFeaturedProducts() {
         return;
     }
 
-    // Sort by featured_order (ascending), then by name as fallback
-    featured.sort(function(a, b) {
-        var orderA = a.featured_order !== undefined && a.featured_order !== null ? a.featured_order : 999;
-        var orderB = b.featured_order !== undefined && b.featured_order !== null ? b.featured_order : 999;
-        if (orderA === orderB) {
-            return a.name.localeCompare(b.name);
-        }
-        return orderA - orderB;
-    });
-
-    // Build the horizontal scrollable list - NO CAROUSEL, just a scrollable flex container
-    var html = '<div class="featured-scroll-container" style="display:flex;overflow-x:auto;gap:14px;padding:4px 4px 12px;scrollbar-width:thin;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;">';
-
+    // Build horizontal scrollable list - matches the existing .product-scroll style
+    var html = '<div class="product-scroll" style="display:flex;gap:14px;overflow-x:auto;padding:4px 4px 12px;scrollbar-width:thin;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;">';
     for (var i = 0; i < featured.length; i++) {
-        html += '<div style="flex:0 0 200px;scroll-snap-align:start;min-width:160px;max-width:250px;">' + productCardHTML(featured[i]) + '</div>';
+        html += '<div style="flex:0 0 170px;scroll-snap-align:start;">' + productCardHTML(featured[i]) + '</div>';
     }
-
     html += '</div>';
 
-    // Add scroll hint if there are more products than fit
+    // Small subtle hint below the "See all →" link (rendered via CSS)
     if (featured.length > 3) {
-        html += '<div style="text-align:center;font-size:11px;color:var(--text-muted);margin-top:4px;">← Scroll to see more →</div>';
+        html += '<div style="text-align:right;font-size:10px;color:var(--text-muted);margin-top:-4px;padding-right:4px;font-style:italic;">← scroll for more</div>';
     }
 
     container.innerHTML = html;
