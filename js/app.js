@@ -40,6 +40,47 @@ function showToast(msg, type) {
     setTimeout(function() { if (t.parentElement) t.remove(); }, 6000);
 }
 
+// ============ DATA CACHING UTILITIES ============
+function getCachedData(key) {
+    try {
+        var raw = localStorage.getItem(key);
+        if (!raw) return null;
+        var data = JSON.parse(raw);
+        if (Date.now() - data.timestamp > 300000) {
+            localStorage.removeItem(key);
+            return null;
+        }
+        return data;
+    } catch(e) {
+        return null;
+    }
+}
+
+function setCachedData(key, data) {
+    try {
+        localStorage.setItem(key, JSON.stringify(data));
+    } catch(e) {}
+}
+
+function invalidateCache() {
+    localStorage.removeItem('abihani_products_cache');
+}
+
+// ============ PRICE DISPLAY UTILITY ============
+function getDisplayPrice(product) {
+    if (typeof product.price_numeric === 'number') {
+        return '₦' + product.price_numeric.toLocaleString();
+    }
+    if (product.price && product.price !== '') {
+        return product.price;
+    }
+    return CONFIG.PRODUCT_DEFAULT_PRICE_TEXT;
+}
+
+function getRawPriceValue(product) {
+    return product.price_numeric || null;
+}
+
 // ============ INIT ============
 (function init() {
     var rawPath = window.location.pathname.replace(/^\/+|\/+$/g, '');
@@ -228,7 +269,6 @@ function initHaniCharacter() {
     document.getElementById('hani-char-img').src = CONFIG.HANI_IMAGE;
     var stored = localStorage.getItem('hani_visible');
     if (stored === '0') char.style.display = 'none';
-    // Removed sleeping animation — keeps it lightweight
 }
 function toggleHaniChat() {
     var char = document.getElementById('hani-character');
@@ -264,19 +304,94 @@ function showAllSkeletons() {
 }
 
 // ============ LOAD DATA ============
-async function loadDynamicData() {
-    var c = await supabase.from('categories').select('*').order('sort_order'); allCategories = c.data || [];
-    var s = await supabase.from('subcategories').select('*'); allSubcategories = s.data || [];
-    var p = await supabase.from('products').select('*').order('id'); allProducts = p.data || [];
-    var a = await supabase.from('site_settings').select('*').eq('id', 1).single();
-    if (a.data) {
-        if (a.data.announcement_text) { announcementText = a.data.announcement_text; var atEl = document.getElementById('announcement-text'); if (atEl) atEl.textContent = announcementText; }
-        if (a.data.mock_data_enabled !== undefined) mockDataActive = a.data.mock_data_enabled;
-        if (a.data.maintenance_mode !== undefined) maintenanceModeActive = a.data.maintenance_mode;
+async function loadDynamicData(forceRefresh) {
+    if (forceRefresh) {
+        invalidateCache();
     }
+    var cacheData = getCachedData('abihani_products_cache');
+    if (cacheData && !forceRefresh) {
+        allCategories = cacheData.categories || [];
+        allSubcategories = cacheData.subcategories || [];
+        allProducts = cacheData.products || [];
+        announcementText = cacheData.announcementText || CONFIG.UI_ANNOUNCEMENT_DEFAULT;
+        mockDataActive = cacheData.mockDataActive !== undefined ? cacheData.mockDataActive : CONFIG.MOCK_DATA_ENABLED !== false;
+        maintenanceModeActive = cacheData.maintenanceModeActive || CONFIG.MAINTENANCE_MODE_ENABLED || false;
+
+        if (mockDataActive) mergeMockData();
+        updateCategoriesHome();
+        updateShopCategories();
+        updateFeaturedProducts();
+        var ag = document.getElementById('all-products-grid');
+        if (ag) renderAllProducts();
+        return allProducts;
+    }
+
+    try {
+        var results = await Promise.all([
+            supabase.from('categories').select('*').order('sort_order'),
+            supabase.from('subcategories').select('*'),
+            supabase.from('products').select('*').order('id'),
+            supabase.from('site_settings').select('*').eq('id', 1).single()
+        ]);
+
+        var c = results[0];
+        var s = results[1];
+        var p = results[2];
+        var a = results[3];
+
+        allCategories = c.data || [];
+        allSubcategories = s.data || [];
+        allProducts = p.data || [];
+
+        if (a.data) {
+            if (a.data.announcement_text) { announcementText = a.data.announcement_text; var atEl = document.getElementById('announcement-text'); if (atEl) atEl.textContent = announcementText; }
+            if (a.data.mock_data_enabled !== undefined) mockDataActive = a.data.mock_data_enabled;
+            if (a.data.maintenance_mode !== undefined) maintenanceModeActive = a.data.maintenance_mode;
+        }
+
+        setCachedData('abihani_products_cache', {
+            categories: allCategories,
+            subcategories: allSubcategories,
+            products: allProducts,
+            announcementText: announcementText,
+            mockDataActive: mockDataActive,
+            maintenanceModeActive: maintenanceModeActive,
+            timestamp: Date.now()
+        });
+
+    } catch(e) {
+        console.error('Failed to load data:', e);
+        try {
+            var c = await supabase.from('categories').select('*').order('sort_order');
+            allCategories = c.data || [];
+        } catch(e2) { allCategories = []; }
+
+        try {
+            var s = await supabase.from('subcategories').select('*');
+            allSubcategories = s.data || [];
+        } catch(e2) { allSubcategories = []; }
+
+        try {
+            var p = await supabase.from('products').select('*').order('id');
+            allProducts = p.data || [];
+        } catch(e2) { allProducts = []; }
+
+        try {
+            var a = await supabase.from('site_settings').select('*').eq('id', 1).single();
+            if (a.data) {
+                if (a.data.announcement_text) { announcementText = a.data.announcement_text; var atEl = document.getElementById('announcement-text'); if (atEl) atEl.textContent = announcementText; }
+                if (a.data.mock_data_enabled !== undefined) mockDataActive = a.data.mock_data_enabled;
+                if (a.data.maintenance_mode !== undefined) maintenanceModeActive = a.data.maintenance_mode;
+            }
+        } catch(e2) { console.error('Failed to load site settings:', e2); }
+    }
+
     if (mockDataActive) mergeMockData();
-    updateCategoriesHome(); updateShopCategories(); updateFeaturedProducts();
-    var ag = document.getElementById('all-products-grid'); if (ag) renderAllProducts();
+    updateCategoriesHome();
+    updateShopCategories();
+    updateFeaturedProducts();
+    var ag = document.getElementById('all-products-grid');
+    if (ag) renderAllProducts();
     return allProducts;
 }
 
@@ -368,26 +483,21 @@ testimonialInterval = setInterval(rotateTestimonial, 5000);
 // ============ NAVIGATION (Clean URLs - No Hash) ============
 var validAppPages = ['home','shop','search','about','contact','profile','admin-login','admin-dashboard','product-detail','terms','privacy'];
 
-// ============ NAVIGATION (Clean URLs - No Hash) ============
-var validAppPages = ['home','shop','search','about','contact','profile','admin-login','admin-dashboard','product-detail','terms','privacy'];
-
 function navigateTo(pageName, addToHistory) {
     if (addToHistory === undefined) addToHistory = true;
     if (pageName === 'profile' && isAdminLoggedIn) { pageName = 'admin-dashboard'; }
     if (pageName === 'admin-dashboard' && !isAdminLoggedIn) { pageName = 'profile'; }
-    
-    // Handle Admin Dashboard - DO NOT inject spinner HTML here. Let renderAdminPanels handle it.
+
     if (pageName === 'admin-dashboard') {
         showPage('admin-dashboard');
-        // Use a tiny delay to ensure DOM is ready, then render
         setTimeout(function() { renderAdminPanels(); }, 50);
         if (addToHistory && pageName !== pageHistoryStack[pageHistoryStack.length - 1]) pushToHistory(pageName);
         resetInactivityTimer();
         return;
     }
-    
-    if (pageName === 'product-detail') return; // Prevent direct navigation without ID
-    
+
+    if (pageName === 'product-detail') return;
+
     showPage(pageName);
     if (addToHistory && pageName !== pageHistoryStack[pageHistoryStack.length - 1]) pushToHistory(pageName);
     if (isAdminLoggedIn) resetInactivityTimer();
@@ -421,7 +531,7 @@ function showPage(pageName) {
     if (pageName === 'search') { var sr = document.getElementById('search-results'); if (sr) sr.innerHTML = ''; var si = document.getElementById('search-input'); if (si) si.value = ''; }
     updateNav(pageName); updatePageHistory(pageName);
 }
-function updatePageHistory(page) { 
+function updatePageHistory(page) {
     if (pageHistoryStack.length === 0 || pageHistoryStack[pageHistoryStack.length - 1] !== page) {
         pageHistoryStack.push(page);
     }
@@ -444,23 +554,23 @@ function updateNav(page) {
     }
     document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
     var nm = { home: 'nav-home', shop: 'nav-shop', search: 'nav-search', profile: 'nav-profile', about: 'nav-home', contact: 'nav-home', terms: 'nav-home', privacy: 'nav-home', 'admin-login': 'nav-profile', 'admin-dashboard': 'nav-profile', 'product-detail': 'nav-shop' };
-    var tid = nm[page] || 'nav-home'; 
-    var an = document.getElementById(tid); 
+    var tid = nm[page] || 'nav-home';
+    var an = document.getElementById(tid);
     if (an) an.classList.add('active');
     document.querySelectorAll('.desktop-nav a').forEach(function(a) { a.classList.remove('active'); });
-    var da = document.querySelector('.desktop-nav a[data-page="' + page + '"]'); 
+    var da = document.querySelector('.desktop-nav a[data-page="' + page + '"]');
     if (da) da.classList.add('active');
 }
 window.addEventListener('popstate', function(e) {
     var state = e.state;
-    if (!state || !state.isAppPage) { 
-        navigateTo('home', false); 
-        return; 
+    if (!state || !state.isAppPage) {
+        navigateTo('home', false);
+        return;
     }
     var path = state.page || 'home';
-    if (validAppPages.indexOf(path) === -1) { 
-        navigateTo('home', false); 
-        return; 
+    if (validAppPages.indexOf(path) === -1) {
+        navigateTo('home', false);
+        return;
     }
     if (pageHistoryStack.length > 0 && pageHistoryStack[pageHistoryStack.length - 1] !== path) {
         pageHistoryStack.push(path);
@@ -513,21 +623,53 @@ function productCardHTML(p) {
     if (half) stars += '<i class="fas fa-star-half-alt"></i>';
     for (var i = 0; i < empty; i++) stars += '<i class="far fa-star"></i>';
     var rc = (p.review_count && p.review_count > 0) ? p.review_count : Math.floor(Math.random() * 235) + 12;
-    var imgHtml = p.image_url ? '<img src="' + p.image_url + '" alt="' + p.name + '" loading="lazy">' : '<div style="font-size:40px;display:flex;align-items:center;justify-content:center;height:100%">' + (p.image_icon || CONFIG.PRODUCT_DEFAULT_ICON) + '</div>';
-    var priceHtml = '<div class="product-price">₦' + (p.price ? p.price.toLocaleString() : '0') + '</div>';
-    if (p.discount_percent > 0) { var sp = Math.round(p.price * (1 - p.discount_percent / 100)); priceHtml = '<div class="product-price"><span style="text-decoration:line-through;color:var(--text-muted);font-size:14px">₦' + p.price.toLocaleString() + '</span> ₦' + sp.toLocaleString() + ' <span style="background:#e74c3c;color:#fff;padding:2px 6px;border-radius:4px;font-size:10px">-' + p.discount_percent + '%</span></div>'; }
+    var imgUrl = p.image_url;
+    if (imgUrl) {
+        if (imgUrl.indexOf('cache-control=') === -1) {
+            imgUrl = imgUrl + (imgUrl.indexOf('?') === -1 ? '?' : '&') + 'cache-control=max-age=86400';
+        }
+    }
+    var imgHtml = imgUrl ? '<img src="' + imgUrl + '" alt="' + p.name + '" loading="lazy" fetchpriority="' + (p.featured ? 'high' : 'auto') + '">' : '<div style="font-size:40px;display:flex;align-items:center;justify-content:center;height:100%">' + (p.image_icon || CONFIG.PRODUCT_DEFAULT_ICON) + '</div>';
+
+    var displayPrice = getDisplayPrice(p);
+    var priceHtml = '<div class="product-price">' + displayPrice + '</div>';
+
+    if (typeof p.price_numeric === 'number' && p.discount_percent > 0) {
+        var sp = Math.round(p.price_numeric * (1 - p.discount_percent / 100));
+        var originalPrice = '₦' + p.price_numeric.toLocaleString();
+        var salePrice = '₦' + sp.toLocaleString();
+        priceHtml = '<div class="product-price"><span style="text-decoration:line-through;color:var(--text-muted);font-size:14px">' + originalPrice + '</span> ' + salePrice + ' <span style="background:#e74c3c;color:#fff;padding:2px 6px;border-radius:4px;font-size:10px">-' + p.discount_percent + '%</span></div>';
+    }
+
     return '<div class="product-card" onclick="showProductDetail(\'' + p.id + '\', \'shop\')"><div class="product-image">' + imgHtml + '</div><div class="product-info"><h4>' + (p.name || '') + '</h4>' + priceHtml + '<div class="product-rating">' + stars + ' (' + rc + ')</div><div class="product-vendor"><i class="fas fa-store"></i> ' + (p.vendor || CONFIG.PRODUCT_DEFAULT_VENDOR) + '</div><button class="btn-wa-small" onclick="event.stopPropagation();buyNow(\'' + p.id + '\')"><i class="fab fa-whatsapp"></i> ' + CONFIG.UI_BUY_NOW + '</button></div></div>';
 }
+
+// ============ FEATURED PRODUCTS - HORIZONTAL SCROLL (NO CAROUSEL) ============
 function updateFeaturedProducts() {
-    var c = document.getElementById('featured-products'); if (!c) return;
-    var feat = allProducts.filter(function(p) { return p.featured; });
-    feat = feat.sort(function() { return 0.5 - Math.random(); }).slice(0, CONFIG.FEATURED_PRODUCTS_DISPLAY_COUNT || 8);
-    c.innerHTML = feat.length ? feat.map(productCardHTML).join('') : '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.UI_NO_FEATURED_PRODUCTS + '</p></div>';
-}
-function renderAllProducts() {
-    var c = document.getElementById('all-products-grid'); if (!c) return;
-    var items = currentFilterCategory ? allProducts.filter(function(p) { return p.category_id == currentFilterCategory; }) : allProducts;
-    c.innerHTML = items.length ? items.map(productCardHTML).join('') : '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.EMPTY_PRODUCTS + '</p></div>';
+    var container = document.getElementById('featured-products');
+    if (!container) return;
+
+    // Get featured products
+    var featured = allProducts.filter(function(p) { return p.featured; });
+
+    if (featured.length === 0) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.UI_NO_FEATURED_PRODUCTS + '</p></div>';
+        return;
+    }
+
+    // Build horizontal scrollable list - matches the existing .product-scroll style
+    var html = '<div class="product-scroll" style="display:flex;gap:14px;overflow-x:auto;padding:4px 4px 12px;scrollbar-width:thin;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;">';
+    for (var i = 0; i < featured.length; i++) {
+        html += '<div style="flex:0 0 170px;scroll-snap-align:start;">' + productCardHTML(featured[i]) + '</div>';
+    }
+    html += '</div>';
+
+    // Small subtle hint below the "See all →" link (rendered via CSS)
+    if (featured.length > 3) {
+        html += '<div style="text-align:right;font-size:10px;color:var(--text-muted);margin-top:-4px;padding-right:4px;font-style:italic;">← scroll for more</div>';
+    }
+
+    container.innerHTML = html;
 }
 
 // ============ PRODUCT DETAIL ============
@@ -555,8 +697,14 @@ document.getElementById('tw-image').content = imgForMeta;
     var mainImg = imgs.length ? imgs[0] : '';
     var arrowNav = '';
     if (imgs.length > 1) { arrowNav = '<div class="detail-arrow-nav"><button class="detail-arrow detail-prev" onclick="navigateDetailImage(-1)"><i class="fas fa-chevron-left"></i></button><button class="detail-arrow detail-next" onclick="navigateDetailImage(1)"><i class="fas fa-chevron-right"></i></button></div><div class="detail-dots">' + imgs.map(function(_, idx) { return '<span class="detail-dot' + (idx === 0 ? ' active' : '') + '" onclick="jumpToDetailImage(' + idx + ')"></span>'; }).join('') + '</div>'; }
-    var priceHtml = '₦' + p.price.toLocaleString();
-    if (p.discount_percent > 0) { var sp = Math.round(p.price * (1 - p.discount_percent / 100)); priceHtml = '<span style="text-decoration:line-through;color:var(--text-muted)">₦' + p.price.toLocaleString() + '</span> <span style="color:var(--accent)">₦' + sp.toLocaleString() + '</span> <span style="background:#e74c3c;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px">-' + p.discount_percent + '%</span>'; }
+    var displayPrice = getDisplayPrice(p);
+var priceHtml = displayPrice;
+if (typeof p.price_numeric === 'number' && p.discount_percent > 0) {
+    var sp = Math.round(p.price_numeric * (1 - p.discount_percent / 100));
+    var originalPrice = '₦' + p.price_numeric.toLocaleString();
+    var salePrice = '₦' + sp.toLocaleString();
+    priceHtml = '<span style="text-decoration:line-through;color:var(--text-muted)">' + originalPrice + '</span> <span style="color:var(--accent)">' + salePrice + '</span> <span style="background:#e74c3c;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px">-' + p.discount_percent + '%</span>';
+}
     document.getElementById('detail-back-label').textContent = detailSource === 'search' ? 'Back to Search' : 'Back to Shop';
     document.getElementById('product-share-container').innerHTML = '<button class="btn-secondary btn-sm" onclick="shareProduct(\'' + p.id + '\')"><i class="fas fa-share-alt"></i> Share</button>';
     document.getElementById('product-detail-container').innerHTML = '<div class="product-detail-container"><div class="product-detail-image"><div class="detail-image-wrapper"><img id="detail-main-img" src="' + (mainImg || 'https://placehold.co/400x400/e6d5c0/8b5a2b?text=' + encodeURIComponent(p.name || '')) + '" alt="' + p.name + '">' + arrowNav + '</div></div><div class="product-detail-info"><h1>' + p.name + '</h1><div class="product-detail-price">' + priceHtml + '</div><p>⭐ ' + (p.rating || CONFIG.PRODUCT_DEFAULT_RATING) + ' (' + (p.review_count || 0) + ' reviews)</p><p><i class="fas fa-map-marker-alt"></i> ' + (p.location || CONFIG.PRODUCT_DEFAULT_LOCATION) + '</p><p><i class="fas fa-store"></i> ' + (p.vendor || CONFIG.PRODUCT_DEFAULT_VENDOR) + '</p><p>' + (p.description || '') + '</p><button class="btn-primary" onclick="buyNow(\'' + p.id + '\')"><i class="fab fa-whatsapp"></i> Buy Now via WhatsApp</button><button class="btn-secondary" style="margin-top:12px" onclick="navigateTo(\'' + detailSource + '\')">← Back</button></div></div>';
@@ -729,16 +877,16 @@ function updateCategoriesHome() { var c = document.getElementById('categories-ho
 function updateShopCategories() { var c = document.getElementById('shop-categories-filter'); if (!c) return; c.innerHTML = '<div class="category-pill active" onclick="filterAllProducts()">All</div>' + allCategories.map(function(cat) { return '<div class="category-pill" onclick="filterByCategory(\'' + cat.id + '\')">' + (cat.emoji || '') + ' ' + cat.name + '</div>'; }).join(''); }
 
 function buyNow(id) {
-    var p = allProducts.find(function(x) { return x.id == id; }); 
+    var p = allProducts.find(function(x) { return x.id == id; });
     if (!p) return;
     if (p.is_mock) { showToast('This is a mock product for display', 'info'); return; }
-    
+
     var whatsapp = p.owner_whatsapp || CONFIG.WHATSAPP_NUMBER;
     var productLink = window.location.origin + '/product-detail?id=' + encodeURIComponent(id);
-    
-    // Using double newlines at the end forces cursor to the bottom in many mobile apps
-    var message = 'Hello! I want: ' + p.name + ' (₦' + p.price + ')\n\nProduct:\n' + productLink + '\n\n';
-    
+    var displayPrice = getDisplayPrice(p);
+
+    var message = 'Hello! I want: ' + p.name + ' (' + displayPrice + ')\n\nProduct:\n' + productLink + '\n\n';
+
     window.open('https://wa.me/' + whatsapp.replace(/[^0-9]/g, '') + '?text=' + encodeURIComponent(message), '_blank');
 }
 function showExpiryWarning(expiryDate) { showToast('Your partnership expires on ' + expiryDate.toLocaleDateString() + '. Contact CEO to renew.', 'info'); }
@@ -787,14 +935,14 @@ window.showHaniPopup = showHaniPopup; window.closeHaniPopup = closeHaniPopup;
 window.toggleHaniChat = toggleHaniChat; window.showPWABanner = showPWABanner;
 window.closePWAInstall = closePWAInstall; window.installPWA = installPWA;
 window.toggleHaniVisibility = toggleHaniVisibility;
+
 // ============ ADMIN DASHBOARD ============
 async function renderAdminPanels() {
-    // Safety check: if session or email is missing, redirect back to login
     if (!isAdminLoggedIn || !currentUserEmail) {
         navigateTo('profile', false);
         return;
     }
-    
+
     await loadDynamicData();
     var isCEO = currentUserIsCEO;
     var ownerFilter = viewingAdminEmail || currentUserEmail;
@@ -849,7 +997,12 @@ async function renderAdminPanels() {
         }
     }
 
-    html += '<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap"><button class="btn-primary" onclick="showAddProductForm()"><i class="fas fa-plus"></i> ' + CONFIG.UI_ADD_PRODUCT + '</button><button class="btn-secondary" onclick="showAddCategoryForm()"><i class="fas fa-plus"></i> ' + CONFIG.UI_ADD_CATEGORY + '</button></div>';
+    html += '<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">';
+    html += '<button class="btn-primary" onclick="showAddProductForm()"><i class="fas fa-plus"></i> ' + CONFIG.UI_ADD_PRODUCT + '</button>';
+    html += '<button class="btn-secondary" onclick="showBulkUploadForm()"><i class="fas fa-images"></i> Bulk Upload</button>';
+    html += '<button class="btn-secondary" onclick="showAddCategoryForm()"><i class="fas fa-plus"></i> ' + CONFIG.UI_ADD_CATEGORY + '</button>';
+    html += '</div>';
+
     html += '<div class="admin-card" style="cursor:pointer" onclick="renderAllProductsAdmin()"><h4>📦 All Products (' + filteredProducts.length + ')</h4><p style="font-size:11px;color:var(--text-muted)">Tap to view, edit or delete</p></div>';
     html += '<div class="admin-card" style="cursor:pointer" onclick="renderCategoriesListAdmin()"><h4>📁 Categories (' + filteredCategories.length + ')</h4><p style="font-size:11px;color:var(--text-muted)">Tap to browse categories</p></div>';
 
@@ -1018,15 +1171,187 @@ async function saveAnnouncement() {
     showToast('Announcement saved!', 'success');
 }
 
-// ============ ALL PRODUCTS (ADMIN) ============
+// ============ ALL PRODUCTS (ADMIN) WITH BULK ACTIONS ============
 function renderAllProductsAdmin() {
     var ownerFilter = viewingAdminEmail || currentUserEmail;
     var prods = allProducts.filter(function(p) { return currentUserIsCEO && !viewingAdminEmail ? !p.is_mock : (p.owner_email === ownerFilter && !p.is_mock); });
     var container = document.getElementById('admin-dashboard-content');
-    var html = '<div class="flex-between" style="margin-bottom:16px"><button class="btn-outline btn-sm" onclick="renderAdminPanels()">← Back</button><h3>📦 All Products (' + prods.length + ')</h3><span></span></div>';
-    if (prods.length === 0) { html += '<p style="text-align:center;color:var(--text-muted);padding:30px">No products yet</p>'; }
-    else { for (var i = 0; i < prods.length; i++) { var p = prods[i]; html += '<div class="item-row" onclick="renderEditProduct(\'' + p.id + '\')"><span>' + (p.image_url ? '<img src="' + p.image_url + '" style="width:40px;height:40px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle">' : '<span style="font-size:24px;margin-right:8px;vertical-align:middle">' + (p.image_icon || '📦') + '</span>') + '<strong>' + p.name + '</strong><br><small style="color:var(--accent)">₦' + (p.price || 0).toLocaleString() + '</small> ' + (p.featured ? '⭐' : '') + '</span><span style="font-size:20px;color:var(--accent)">›</span></div>'; } }
+
+    var html = '<div class="flex-between" style="margin-bottom:16px">';
+    html += '<button class="btn-outline btn-sm" onclick="renderAdminPanels()">← Back</button>';
+    html += '<h3>📦 All Products (' + prods.length + ')</h3>';
+    html += '<span></span></div>';
+
+    html += '<div class="bulk-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:var(--bg-secondary);border-radius:var(--radius-sm);">';
+    html += '<label style="font-size:13px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="select-all-products" onchange="toggleAllProducts()"> Select All</label>';
+    html += '<button class="btn-danger btn-sm" id="bulk-delete-btn" onclick="bulkDeleteProducts()" disabled>🗑️ Delete</button>';
+    html += '<button class="btn-primary btn-sm" id="bulk-featured-btn" onclick="bulkSetFeatured(true)" disabled>⭐ Set Featured</button>';
+    html += '<button class="btn-secondary btn-sm" id="bulk-unfeatured-btn" onclick="bulkSetFeatured(false)" disabled>☆ Remove Featured</button>';
+    html += '<span id="selected-count" style="font-size:12px;color:var(--text-muted);margin-left:auto;">0 selected</span>';
+    html += '</div>';
+
+    // Add featured order management section
+    html += '<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-secondary);border-radius:var(--radius-sm);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+    html += '<span style="font-size:12px;font-weight:600;">⚡ Featured Order:</span>';
+    html += '<input type="number" id="featured-order-input" value="1" min="1" style="width:60px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);">';
+    html += '<button class="btn-primary btn-sm" onclick="bulkSetFeaturedOrder()">Update Order</button>';
+    html += '<span style="font-size:10px;color:var(--text-muted);margin-left:4px;">(Set order for selected products)</span>';
+    html += '</div>';
+
+    if (prods.length === 0) {
+        html += '<p style="text-align:center;color:var(--text-muted);padding:30px">No products yet</p>';
+    } else {
+        for (var i = 0; i < prods.length; i++) {
+            var p = prods[i];
+            var displayPrice = getDisplayPrice(p);
+            var orderDisplay = (p.featured_order !== undefined && p.featured_order !== null) ? ' #' + p.featured_order : '';
+
+            html += '<div class="item-row" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);">';
+            html += '<input type="checkbox" class="product-select-checkbox" data-id="' + p.id + '" onchange="updateBulkSelectUI()">';
+            html += '<div style="flex:1;cursor:pointer" onclick="renderEditProduct(\'' + p.id + '\')">';
+            html += (p.image_url ? '<img src="' + p.image_url + '" style="width:40px;height:40px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle">' : '<span style="font-size:24px;margin-right:8px;vertical-align:middle">' + (p.image_icon || '📦') + '</span>');
+            html += '<strong>' + p.name + '</strong>';
+            html += '<br><small style="color:var(--accent)">' + displayPrice + '</small>';
+            if (p.featured) html += ' ⭐' + orderDisplay;
+            html += '</div>';
+            html += '<span style="font-size:20px;color:var(--accent);">›</span>';
+            html += '</div>';
+        }
+    }
     container.innerHTML = html;
+}
+
+// Bulk delete functions
+var selectedProductIds = [];
+
+function toggleAllProducts() {
+    var checked = document.getElementById('select-all-products').checked;
+    var checkboxes = document.querySelectorAll('.product-select-checkbox');
+    for (var i = 0; i < checkboxes.length; i++) {
+        checkboxes[i].checked = checked;
+    }
+    updateBulkSelectUI();
+}
+
+function updateBulkSelectUI() {
+    var checkboxes = document.querySelectorAll('.product-select-checkbox');
+    var checked = [];
+    for (var i = 0; i < checkboxes.length; i++) {
+        if (checkboxes[i].checked) checked.push(checkboxes[i].getAttribute('data-id'));
+    }
+    selectedProductIds = checked;
+    var count = checked.length;
+    var countEl = document.getElementById('selected-count');
+    if (countEl) countEl.textContent = count + ' selected';
+    var btns = ['bulk-delete-btn', 'bulk-featured-btn', 'bulk-unfeatured-btn'];
+    for (var b = 0; b < btns.length; b++) {
+        var btn = document.getElementById(btns[b]);
+        if (btn) btn.disabled = count === 0;
+    }
+    var selectAll = document.getElementById('select-all-products');
+    if (selectAll) {
+        var total = checkboxes.length;
+        if (total > 0 && count === total) selectAll.checked = true;
+        else if (count === 0) selectAll.checked = false;
+        else selectAll.indeterminate = true;
+    }
+}
+
+function bulkDeleteProducts() {
+    if (selectedProductIds.length === 0) return;
+    if (!confirm('Delete ' + selectedProductIds.length + ' selected products permanently?')) return;
+    var count = selectedProductIds.length;
+
+    var promises = [];
+    for (var i = 0; i < selectedProductIds.length; i++) {
+        promises.push(supabase.from('products').delete().eq('id', selectedProductIds[i]));
+    }
+
+    Promise.all(promises).then(function(results) {
+        var successCount = results.filter(function(r) { return !r.error; }).length;
+        if (successCount === count) {
+            showToast(count + ' products deleted!', 'success');
+        } else {
+            showToast(successCount + ' of ' + count + ' products deleted. Some failed.', 'error');
+        }
+        loadDynamicData(true).then(function() {
+            renderAllProductsAdmin();
+            updateFeaturedProducts();
+        });
+    }).catch(function() {
+        showToast('Error deleting products. Please try again.', 'error');
+    });
+}
+
+function bulkSetFeatured(featured) {
+    if (selectedProductIds.length === 0) return;
+    var action = featured ? 'feature' : 'unfeature';
+    if (!confirm('Set ' + selectedProductIds.length + ' products as ' + (featured ? 'featured' : 'not featured') + '?')) return;
+
+    var promises = [];
+    for (var i = 0; i < selectedProductIds.length; i++) {
+        var updateData = { featured: featured };
+        if (featured) {
+            // Set a default order if featuring
+            updateData.featured_order = 0;
+        } else {
+            updateData.featured_order = null;
+        }
+        promises.push(supabase.from('products').update(updateData).eq('id', selectedProductIds[i]));
+    }
+
+    Promise.all(promises).then(function(results) {
+        var successCount = results.filter(function(r) { return !r.error; }).length;
+        if (successCount === selectedProductIds.length) {
+            showToast(selectedProductIds.length + ' products ' + (featured ? 'featured!' : 'unfeatured!'), 'success');
+        } else {
+            showToast(successCount + ' of ' + selectedProductIds.length + ' updated. Some failed.', 'error');
+        }
+        // Reset selection
+        selectedProductIds = [];
+        loadDynamicData(true).then(function() {
+            renderAllProductsAdmin();
+            updateFeaturedProducts();
+            updateBulkSelectUI();
+        });
+    }).catch(function() {
+        showToast('Error updating products.', 'error');
+    });
+}
+
+function bulkSetFeaturedOrder() {
+    if (selectedProductIds.length === 0) return;
+    var orderInput = document.getElementById('featured-order-input');
+    var startOrder = parseInt(orderInput.value) || 1;
+    if (startOrder < 1) startOrder = 1;
+
+    if (!confirm('Set featured order starting from ' + startOrder + ' for ' + selectedProductIds.length + ' selected products?')) return;
+
+    var promises = [];
+    for (var i = 0; i < selectedProductIds.length; i++) {
+        var order = startOrder + i;
+        promises.push(supabase.from('products').update({
+            featured: true,
+            featured_order: order
+        }).eq('id', selectedProductIds[i]));
+    }
+
+    Promise.all(promises).then(function(results) {
+        var successCount = results.filter(function(r) { return !r.error; }).length;
+        if (successCount === selectedProductIds.length) {
+            showToast(selectedProductIds.length + ' products order updated!', 'success');
+        } else {
+            showToast(successCount + ' of ' + selectedProductIds.length + ' updated. Some failed.', 'error');
+        }
+        selectedProductIds = [];
+        loadDynamicData(true).then(function() {
+            renderAllProductsAdmin();
+            updateFeaturedProducts();
+            updateBulkSelectUI();
+        });
+    }).catch(function() {
+        showToast('Error updating product order.', 'error');
+    });
 }
 
 // ============ CATEGORIES LIST (ADMIN) ============
@@ -1060,7 +1385,9 @@ function renderSubProductsAdmin(subId) {
     var container = document.getElementById('admin-dashboard-content');
     var html = '<div class="flex-between" style="margin-bottom:16px"><button class="btn-outline btn-sm" onclick="renderSubcategoriesAdmin(\'' + sub.category_id + '\')">← Back</button><h3>📂 ' + sub.name + '</h3><span></span></div>';
     if (prods.length === 0) { html += '<p style="text-align:center;color:var(--text-muted);padding:20px">No products here</p>'; }
-    else { for (var i = 0; i < prods.length; i++) { var p = prods[i]; html += '<div class="item-row" onclick="renderEditProduct(\'' + p.id + '\')"><span>' + (p.image_url ? '<img src="' + p.image_url + '" style="width:36px;height:36px;object-fit:cover;border-radius:4px;margin-right:8px;vertical-align:middle">' : '<span style="font-size:22px;margin-right:8px;vertical-align:middle">' + (p.image_icon || '📦') + '</span>') + '<strong>' + p.name + '</strong><br><small style="color:var(--accent)">₦' + (p.price || 0).toLocaleString() + '</small></span><span style="font-size:20px;color:var(--accent)">›</span></div>'; } }
+    else { for (var i = 0; i < prods.length; i++) { var p = prods[i]; var displayPrice = getDisplayPrice(p);
+html += '<div class="item-row" onclick="renderEditProduct(\'' + p.id + '\')"><span>' + (p.image_url ? '<img src="' + p.image_url + '" style="width:36px;height:36px;object-fit:cover;border-radius:4px;margin-right:8px;vertical-align:middle">' : '<span style="font-size:22px;margin-right:8px;vertical-align:middle">' + (p.image_icon || '📦') + '</span>') + '<strong>' + p.name + '</strong><br><small style="color:var(--accent)">' + displayPrice + '</small></span><span style="font-size:20px;color:var(--accent)">›</span></div>';
+} }
     container.innerHTML = html;
 }
 
@@ -1069,7 +1396,8 @@ function showAddProductForm() {
     var catOpts = allCategories.filter(function(c){return !c.is_mock;}).map(function(c){return '<option value="'+c.id+'">'+(c.emoji||'')+' '+c.name+'</option>';}).join('');
     var html = '<h3>➕ Add Product</h3>';
     html += '<label>Product Name *</label><input id="ap-name" class="admin-input" placeholder="Product Name">';
-    html += '<label>Price (₦) *</label><input id="ap-price" class="admin-input" type="number" placeholder="Price">';
+    html += '<label>Price <span style="color:var(--text-muted);font-weight:400;">(Optional — text or number)</span></label>';
+    html += '<input id="ap-price" class="admin-input" type="text" placeholder="e.g. 15000 or Ask on WhatsApp or Contact for Price">';
     html += '<label>Category</label><select id="ap-category" class="admin-input" onchange="updateAddSubcats()"><option value="">None</option>' + catOpts + '</select>';
     html += '<label>Subcategory</label><select id="ap-subcategory" class="admin-input"><option value="">None</option></select>';
     html += '<label>Description</label><textarea id="ap-desc" class="admin-input" rows="2"></textarea>';
@@ -1089,15 +1417,255 @@ function showAddProductForm() {
 }
 function addAddSidePicker() { var c = document.getElementById('ap-side-container'); var d = document.createElement('div'); d.style.marginTop = '4px'; d.innerHTML = '<input type="file" accept="image/*" class="ap-side-picker" style="font-size:12px">'; c.appendChild(d); }
 async function saveNewProduct() {
-    var name = document.getElementById('ap-name').value.trim(); var price = parseInt(document.getElementById('ap-price').value);
-    if (!name || !price) { showToast('Name and price required', 'error'); return; }
+    var name = document.getElementById('ap-name').value.trim();
+    var priceInput = document.getElementById('ap-price').value.trim();
+    if (!name) { showToast('Name is required', 'error'); return; }
+
+    var price = priceInput || CONFIG.PRODUCT_DEFAULT_PRICE_TEXT;
+    var priceNumeric = null;
+    var cleanPrice = priceInput.replace(/,/g, '').trim();
+    if (/^[\d]+$/.test(cleanPrice)) {
+        priceNumeric = parseInt(cleanPrice);
+        price = '₦' + priceNumeric.toLocaleString();
+    }
+
     var ownerEmail = viewingAdminEmail || currentUserEmail;
     var mainUrl = ''; var mf = document.getElementById('ap-main-image').files[0];
     if (mf) { var ext = mf.name.split('.').pop(); var fn = 'products/' + Date.now() + '_main.' + ext; var up = await supabase.storage.from('images').upload(fn, mf); if (!up.error) mainUrl = supabase.storage.from('images').getPublicUrl(fn).data.publicUrl; }
     var extraUrls = []; var pickers = document.querySelectorAll('.ap-side-picker');
     for (var i = 0; i < pickers.length; i++) { if (pickers[i].files && pickers[i].files[0]) { var f = pickers[i].files[0]; var eext = f.name.split('.').pop(); var efn = 'products/' + Date.now() + '_' + i + '_extra.' + eext; var eup = await supabase.storage.from('images').upload(efn, f); if (!eup.error) extraUrls.push(supabase.storage.from('images').getPublicUrl(efn).data.publicUrl); } }
-    await supabase.from('products').insert({ name: name, price: price, category_id: document.getElementById('ap-category').value || null, subcategory_id: document.getElementById('ap-subcategory').value || null, description: document.getElementById('ap-desc').value.trim(), rating: parseFloat(document.getElementById('ap-rating').value) || 4.5, review_count: parseInt(document.getElementById('ap-reviews').value) || Math.floor(Math.random() * 235) + 12, stock_quantity: parseInt(document.getElementById('ap-stock').value) || 10, discount_percent: parseInt(document.getElementById('ap-discount').value) || 0, vendor: document.getElementById('ap-vendor').value.trim() || 'Abihani Express', location: document.getElementById('ap-location').value.trim() || 'Potiskum, Yobe State', featured: document.getElementById('ap-featured').checked, image_url: mainUrl, image_urls: JSON.stringify(extraUrls), image_icon: '📦', owner_email: ownerEmail, owner_whatsapp: '' });
+    await supabase.from('products').insert({
+        name: name,
+        price: price,
+        price_numeric: priceNumeric,
+        category_id: document.getElementById('ap-category').value || null,
+        subcategory_id: document.getElementById('ap-subcategory').value || null,
+        description: document.getElementById('ap-desc').value.trim(),
+        rating: parseFloat(document.getElementById('ap-rating').value) || 4.5,
+        review_count: parseInt(document.getElementById('ap-reviews').value) || Math.floor(Math.random() * 235) + 12,
+        stock_quantity: parseInt(document.getElementById('ap-stock').value) || 10,
+        discount_percent: parseInt(document.getElementById('ap-discount').value) || 0,
+        vendor: document.getElementById('ap-vendor').value.trim() || 'Abihani Express',
+        location: document.getElementById('ap-location').value.trim() || 'Potiskum, Yobe State',
+        featured: document.getElementById('ap-featured').checked,
+        featured_order: document.getElementById('ap-featured').checked ? 0 : null,
+        image_url: mainUrl,
+        image_urls: JSON.stringify(extraUrls),
+        image_icon: '📦',
+        owner_email: ownerEmail,
+        owner_whatsapp: ''
+    });
     closeAdminModal(); showToast('Product added!', 'success'); renderAdminPanels();
+}
+
+// ============ BULK UPLOAD ============
+function showBulkUploadForm() {
+    var draft = null;
+    try { draft = JSON.parse(localStorage.getItem('abihani_bulk_draft')); } catch(e) {}
+
+    var html = '<h3>📤 Bulk Upload</h3>';
+    html += '<p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Select multiple images. Each image becomes a product.</p>';
+
+    if (draft && draft.images && draft.images.length > 0) {
+        html += '<div style="background:#fef9f0;border:1px solid var(--accent);border-radius:8px;padding:10px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">';
+        html += '<span style="font-size:13px;">📋 Draft: ' + draft.images.length + ' images ready</span>';
+        html += '<div style="display:flex;gap:6px;"><button class="btn-secondary btn-sm" onclick="restoreBulkDraft()">Restore</button><button class="btn-danger btn-sm" onclick="clearBulkDraft()">Discard</button></div>';
+        html += '</div>';
+    }
+
+    html += '<label>Product Name <span style="color:var(--text-muted);font-weight:400;">(Optional — applied to all)</span></label>';
+    html += '<input id="bulk-name" class="admin-input" placeholder="e.g. Handcrafted Leather Bag" value="' + (draft ? draft.name || '' : '') + '">';
+
+    html += '<label>Category <span style="color:var(--text-muted);font-weight:400;">(Optional)</span></label>';
+    html += '<select id="bulk-category" class="admin-input">';
+    html += '<option value="">None</option>';
+    var allCats = allCategories.filter(function(c){return !c.is_mock;});
+    for (var i = 0; i < allCats.length; i++) {
+        var selected = (draft && draft.categoryId == allCats[i].id) ? 'selected' : '';
+        html += '<option value="' + allCats[i].id + '" ' + selected + '>' + (allCats[i].emoji || '') + ' ' + allCats[i].name + '</option>';
+    }
+    html += '</select>';
+
+    html += '<label>Description <span style="color:var(--text-muted);font-weight:400;">(Optional — applied to all)</span></label>';
+    html += '<textarea id="bulk-desc" class="admin-input" rows="2" placeholder="Brief description for all products">' + (draft ? draft.description || '' : '') + '</textarea>';
+
+    html += '<label>Select Images *</label>';
+    html += '<input type="file" id="bulk-images" accept="image/*" multiple class="admin-input" onchange="saveBulkDraft()">';
+
+    html += '<div id="bulk-preview-area" style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;max-height:200px;overflow-y:auto;padding:8px;background:var(--bg-secondary);border-radius:var(--radius-sm);">';
+    if (draft && draft.images) {
+        for (var j = 0; j < draft.images.length; j++) {
+            html += '<div style="position:relative;width:60px;height:60px;border-radius:6px;overflow:hidden;border:1px solid var(--border);flex-shrink:0;">';
+            html += '<img src="' + draft.images[j] + '" style="width:100%;height:100%;object-fit:cover;">';
+            html += '</div>';
+        }
+    }
+    html += '</div>';
+
+    html += '<div style="display:flex;gap:8px;margin:12px 0;">';
+    html += '<button class="btn-primary" style="flex:1;" onclick="processBulkUpload()"><i class="fas fa-upload"></i> Upload All</button>';
+    html += '<button class="btn-secondary" onclick="closeAdminModal()">Cancel</button>';
+    html += '</div>';
+
+    html += '<p style="font-size:11px;color:var(--text-muted);text-align:center;">Auto-saves draft as you select images. All fields editable after upload.</p>';
+    openAdminModal(html);
+}
+
+function saveBulkDraft() {
+    var files = document.getElementById('bulk-images').files;
+    if (!files || files.length === 0) return;
+
+    var readerPromises = [];
+    for (var i = 0; i < files.length; i++) {
+        readerPromises.push(new Promise(function(resolve) {
+            var reader = new FileReader();
+            reader.onload = function(e) { resolve(e.target.result); };
+            reader.readAsDataURL(files[i]);
+        }));
+    }
+    Promise.all(readerPromises).then(function(results) {
+        var draft = {
+            images: results,
+            name: document.getElementById('bulk-name').value,
+            categoryId: document.getElementById('bulk-category').value,
+            description: document.getElementById('bulk-desc').value,
+            timestamp: Date.now()
+        };
+        localStorage.setItem('abihani_bulk_draft', JSON.stringify(draft));
+
+        var preview = document.getElementById('bulk-preview-area');
+        if (preview) {
+            preview.innerHTML = '';
+            for (var j = 0; j < results.length; j++) {
+                preview.innerHTML += '<div style="position:relative;width:60px;height:60px;border-radius:6px;overflow:hidden;border:1px solid var(--border);flex-shrink:0;"><img src="' + results[j] + '" style="width:100%;height:100%;object-fit:cover;"></div>';
+            }
+        }
+    });
+}
+
+function restoreBulkDraft() {
+    var draft = null;
+    try { draft = JSON.parse(localStorage.getItem('abihani_bulk_draft')); } catch(e) {}
+    if (!draft) return;
+    document.getElementById('bulk-name').value = draft.name || '';
+    document.getElementById('bulk-category').value = draft.categoryId || '';
+    document.getElementById('bulk-desc').value = draft.description || '';
+    var preview = document.getElementById('bulk-preview-area');
+    if (preview && draft.images) {
+        preview.innerHTML = '';
+        for (var i = 0; i < draft.images.length; i++) {
+            preview.innerHTML += '<div style="position:relative;width:60px;height:60px;border-radius:6px;overflow:hidden;border:1px solid var(--border);flex-shrink:0;"><img src="' + draft.images[i] + '" style="width:100%;height:100%;object-fit:cover;"></div>';
+        }
+    }
+    showToast('Draft restored!', 'success');
+}
+
+function clearBulkDraft() {
+    if (!confirm('Discard draft and selected images?')) return;
+    localStorage.removeItem('abihani_bulk_draft');
+    document.getElementById('bulk-preview-area').innerHTML = '';
+    document.getElementById('bulk-images').value = '';
+    showToast('Draft cleared', 'info');
+}
+
+async function processBulkUpload() {
+    var name = document.getElementById('bulk-name').value.trim() || CONFIG.BULK_UPLOAD_DEFAULTS.name;
+    var categoryId = document.getElementById('bulk-category').value || null;
+    var description = document.getElementById('bulk-desc').value.trim() || CONFIG.BULK_UPLOAD_DEFAULTS.description;
+    var files = document.getElementById('bulk-images').files;
+
+    if (!files || files.length === 0) {
+        showToast('Select at least one image', 'error');
+        return;
+    }
+
+    var ownerEmail = viewingAdminEmail || currentUserEmail;
+    var categoryToUse = categoryId;
+
+    if (!categoryToUse) {
+        var existingCat = allCategories.find(function(c) { return c.name === CONFIG.BULK_UPLOAD_DEFAULTS.category && c.owner_email === ownerEmail && !c.is_mock; });
+        if (existingCat) {
+            categoryToUse = existingCat.id;
+        } else {
+            var newCat = await supabase.from('categories').insert({
+                name: CONFIG.BULK_UPLOAD_DEFAULTS.category,
+                emoji: '📦',
+                sort_order: allCategories.length + 1,
+                owner_email: ownerEmail
+            }).select().single();
+            if (newCat.data) {
+                categoryToUse = newCat.data.id;
+                allCategories.push(newCat.data);
+            }
+        }
+    }
+
+    var total = files.length;
+    var uploaded = 0;
+    var errors = 0;
+
+    showToast('Uploading ' + total + ' products...', 'info');
+
+    for (var i = 0; i < files.length; i++) {
+        try {
+            var file = files[i];
+            var ext = file.name.split('.').pop();
+            var filename = 'products/' + Date.now() + '_' + i + '.' + ext;
+            var uploadResult = await supabase.storage.from('images').upload(filename, file);
+
+            var imageUrl = '';
+            if (!uploadResult.error) {
+                imageUrl = supabase.storage.from('images').getPublicUrl(filename).data.publicUrl;
+            }
+
+            var productName = name;
+            if (total === 1) {
+                productName = file.name.replace(/\.[^.]+$/, '') || name;
+            }
+            if (total > 1) {
+                productName = name + ' ' + (i + 1);
+            }
+
+            var priceText = CONFIG.BULK_UPLOAD_DEFAULTS.price;
+
+            await supabase.from('products').insert({
+                name: productName,
+                price: priceText,
+                price_numeric: null,
+                category_id: categoryToUse,
+                subcategory_id: null,
+                description: description,
+                image_url: imageUrl,
+                image_urls: JSON.stringify([]),
+                image_icon: '📦',
+                rating: CONFIG.BULK_UPLOAD_DEFAULTS.rating,
+                review_count: CONFIG.BULK_UPLOAD_DEFAULTS.review_count,
+                stock_quantity: CONFIG.BULK_UPLOAD_DEFAULTS.stock_quantity,
+                discount_percent: CONFIG.BULK_UPLOAD_DEFAULTS.discount_percent,
+                vendor: CONFIG.BULK_UPLOAD_DEFAULTS.vendor,
+                location: CONFIG.BULK_UPLOAD_DEFAULTS.location,
+                featured: CONFIG.BULK_UPLOAD_DEFAULTS.featured,
+                featured_order: CONFIG.BULK_UPLOAD_DEFAULTS.featured ? 0 : null,
+                owner_email: ownerEmail,
+                owner_whatsapp: ''
+            });
+            uploaded++;
+        } catch(e) {
+            errors++;
+            console.error('Upload error for file ' + i, e);
+        }
+    }
+
+    localStorage.removeItem('abihani_bulk_draft');
+    closeAdminModal();
+    await loadDynamicData(true);
+    renderAdminPanels();
+
+    if (errors > 0) {
+        showToast(uploaded + ' uploaded, ' + errors + ' failed', 'error');
+    } else {
+        showToast('✅ ' + uploaded + ' products uploaded!', 'success');
+    }
 }
 
 // ============ EDIT PRODUCT ============
@@ -1107,7 +1675,10 @@ function renderEditProduct(id) {
     var catOpts = allCategories.map(function(c) { return '<option value="' + c.id + '"' + (c.id == p.category_id ? ' selected' : '') + '>' + (c.emoji || '') + ' ' + c.name + '</option>'; }).join('');
     var html = '<h3>✏️ Edit Product</h3>';
     html += '<label>Product Name</label><input id="ep-name" class="admin-input" value="' + p.name + '">';
-    html += '<label>Price (₦)</label><input id="ep-price" class="admin-input" type="number" value="' + p.price + '">';
+    var priceDisplay = p.price || CONFIG.PRODUCT_DEFAULT_PRICE_TEXT;
+    if (typeof p.price_numeric === 'number') priceDisplay = p.price_numeric;
+    html += '<label>Price <span style="color:var(--text-muted);font-weight:400;">(Optional — text or number)</span></label>';
+    html += '<input id="ep-price" class="admin-input" type="text" value="' + priceDisplay + '" placeholder="e.g. 15000 or Ask on WhatsApp">';
     html += '<label>Category</label><select id="ep-category" class="admin-input" onchange="updateEditSubcats()">' + catOpts + '</select>';
     html += '<label>Subcategory</label><select id="ep-subcategory" class="admin-input"><option value="">None</option></select>';
     html += '<label>Description</label><textarea id="ep-desc" class="admin-input" rows="2">' + (p.description || '') + '</textarea>';
@@ -1118,10 +1689,13 @@ function renderEditProduct(id) {
     html += '<label>Vendor</label><input id="ep-vendor" class="admin-input" value="' + (p.vendor || '') + '">';
     html += '<label>Location</label><input id="ep-location" class="admin-input" value="' + (p.location || '') + '">';
     html += '<label style="font-size:12px"><input type="checkbox" id="ep-featured" ' + (p.featured ? 'checked' : '') + '> Featured</label>';
-    if (p.image_url) { html += '<label>Current Image</label><div><img src="' + p.image_url + '" class="image-preview"><button class="btn-danger btn-sm" onclick="removeMainImage()">✕ Remove</button></div>'; }
+    html += '<label>Featured Order <span style="color:var(--text-muted);font-weight:400;">(Lower number = appears first)</span></label>';
+    var orderVal = (p.featured_order !== undefined && p.featured_order !== null) ? p.featured_order : '';
+    html += '<input id="ep-featured-order" class="admin-input" type="number" value="' + orderVal + '" placeholder="Leave blank for auto" min="0">';
+    if (p.image_url) { html += '<label>Current Image</label><div><img src="' + p.image_url + '" class="image-preview" style="max-width:150px;max-height:150px;border-radius:8px;object-fit:cover;border:1px solid var(--border);"><button class="btn-danger btn-sm" onclick="removeMainImage()">✕ Remove</button></div>'; }
     html += '<label>New Main Image</label><input type="file" id="ep-main-image" accept="image/*" class="admin-input"><input type="hidden" id="ep-image-removed" value="false">';
     html += '<label>Side Images</label><div id="side-images-container">';
-    for (var i = 0; i < sideUrls.length; i++) { html += '<div data-index="' + i + '" style="display:flex;align-items:center;gap:8px;margin:4px 0"><img src="' + sideUrls[i] + '" class="image-preview"><button class="btn-danger btn-sm" onclick="removeSideRow(this)">✕</button></div>'; }
+    for (var i = 0; i < sideUrls.length; i++) { html += '<div data-index="' + i + '" style="display:flex;align-items:center;gap:8px;margin:4px 0"><img src="' + sideUrls[i] + '" class="image-preview" style="max-width:80px;max-height:80px;border-radius:4px;object-fit:cover;border:1px solid var(--border);"><button class="btn-danger btn-sm" onclick="removeSideRow(this)">✕</button></div>'; }
     html += '</div><input type="hidden" id="side-removed" value="[]"><button class="btn-outline btn-sm" onclick="addSidePicker()">+ Add Image</button>';
     html += '<button class="btn-primary" style="width:100%;margin-top:12px" onclick="saveEditProduct(\'' + p.id + '\')">💾 Save Changes</button>';
     html += '<button class="btn-danger" style="width:100%;margin-top:8px" onclick="deleteProductConfirm(\'' + p.id + '\',\'' + p.name.replace(/'/g,"\\'") + '\')">🗑️ Delete Product</button>';
@@ -1134,39 +1708,134 @@ function renderEditProduct(id) {
 function addSidePicker() { var c = document.getElementById('side-images-container'); var d = document.createElement('div'); d.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0'; d.innerHTML = '<input type="file" accept="image/*" class="side-picker" style="font-size:12px;flex:1"><button class="btn-danger btn-sm" onclick="removeSideRow(this)">✕</button>'; c.appendChild(d); }
 function removeSideRow(btn) { var row = btn.parentElement; var idx = row.getAttribute('data-index'); if (idx !== null) { var removed = JSON.parse(document.getElementById('side-removed').value || '[]'); removed.push(parseInt(idx)); document.getElementById('side-removed').value = JSON.stringify(removed); } row.remove(); }
 async function saveEditProduct(id) {
-    var name = document.getElementById('ep-name').value.trim(); var price = parseInt(document.getElementById('ep-price').value);
-    if (!name || !price) { showToast('Name and price required', 'error'); return; }
-    var updates = { name: name, price: price, category_id: document.getElementById('ep-category').value || null, subcategory_id: document.getElementById('ep-subcategory').value || null, description: document.getElementById('ep-desc').value.trim(), rating: parseFloat(document.getElementById('ep-rating').value) || 4.5, review_count: parseInt(document.getElementById('ep-reviews').value) || 0, stock_quantity: parseInt(document.getElementById('ep-stock').value) || 10, discount_percent: parseInt(document.getElementById('ep-discount').value) || 0, vendor: document.getElementById('ep-vendor').value.trim(), location: document.getElementById('ep-location').value.trim(), featured: document.getElementById('ep-featured').checked };
+    var name = document.getElementById('ep-name').value.trim();
+    var priceInput = document.getElementById('ep-price').value.trim();
+    if (!name) { showToast('Name is required', 'error'); return; }
+
+    var price = priceInput || CONFIG.PRODUCT_DEFAULT_PRICE_TEXT;
+    var priceNumeric = null;
+    var cleanPrice = priceInput.replace(/,/g, '').trim();
+    if (/^[\d]+$/.test(cleanPrice)) {
+        priceNumeric = parseInt(cleanPrice);
+        price = '₦' + priceNumeric.toLocaleString();
+    }
+
+    var featured = document.getElementById('ep-featured').checked;
+    var featuredOrder = document.getElementById('ep-featured-order').value;
+    var featuredOrderNum = (featuredOrder !== '' && !isNaN(parseInt(featuredOrder))) ? parseInt(featuredOrder) : null;
+
+    // If featured is checked but no order is set, use 0 (will be reordered on save)
+    if (featured && featuredOrderNum === null) {
+        featuredOrderNum = 0;
+    }
+    // If not featured, order should be null
+    if (!featured) {
+        featuredOrderNum = null;
+    }
+
+    var updates = {
+        name: name,
+        price: price,
+        price_numeric: priceNumeric,
+        category_id: document.getElementById('ep-category').value || null,
+        subcategory_id: document.getElementById('ep-subcategory').value || null,
+        description: document.getElementById('ep-desc').value.trim(),
+        rating: parseFloat(document.getElementById('ep-rating').value) || 4.5,
+        review_count: parseInt(document.getElementById('ep-reviews').value) || 0,
+        stock_quantity: parseInt(document.getElementById('ep-stock').value) || 10,
+        discount_percent: parseInt(document.getElementById('ep-discount').value) || 0,
+        vendor: document.getElementById('ep-vendor').value.trim() || 'Abihani Express',
+        location: document.getElementById('ep-location').value.trim() || 'Potiskum, Yobe State',
+        featured: featured,
+        featured_order: featuredOrderNum
+    };
+
     if (document.getElementById('ep-image-removed').value === 'true') { updates.image_url = ''; updates.image_icon = '📦'; }
     var imgFile = document.getElementById('ep-main-image').files[0]; if (imgFile) { var ext = imgFile.name.split('.').pop(); var fn = 'products/' + Date.now() + '_main.' + ext; var up = await supabase.storage.from('images').upload(fn, imgFile); if (!up.error) updates.image_url = supabase.storage.from('images').getPublicUrl(fn).data.publicUrl; }
     var keptUrls = []; var removedIndices = JSON.parse(document.getElementById('side-removed').value || '[]');
     for (var i = 0; i < window._editSideUrls.length; i++) { if (removedIndices.indexOf(i) === -1) keptUrls.push(window._editSideUrls[i]); }
     var pickers = document.querySelectorAll('.side-picker'); for (var j = 0; j < pickers.length; j++) { if (pickers[j].files && pickers[j].files[0]) { var f = pickers[j].files[0]; var eext = f.name.split('.').pop(); var efn = 'products/' + Date.now() + '_' + j + '_extra.' + eext; var eup = await supabase.storage.from('images').upload(efn, f); if (!eup.error) keptUrls.push(supabase.storage.from('images').getPublicUrl(efn).data.publicUrl); } }
     updates.image_urls = JSON.stringify(keptUrls);
-    await supabase.from('products').update(updates).eq('id', id);
-    closeAdminModal(); showToast('Product updated!', 'success'); renderAdminPanels();
+
+    // Perform the update
+    var result = await supabase.from('products').update(updates).eq('id', id);
+
+    if (result.error) {
+        showToast('Error saving: ' + result.error.message, 'error');
+        return;
+    }
+
+    // If featured is true, reorder all featured products to maintain sequence
+    if (featured) {
+        await reorderFeaturedProducts();
+    }
+
+    // Invalidate cache and reload fresh data
+    await loadDynamicData(true);
+
+    closeAdminModal();
+    showToast('Product updated!', 'success');
+
+    // Re-render the admin dashboard with fresh data
+    renderAdminPanels();
+    updateFeaturedProducts();
+
+    // If we're viewing the product detail page, refresh it
+    if (document.getElementById('product-detail-page').classList.contains('active-page')) {
+        var currentId = id;
+        setTimeout(function() {
+            showProductDetail(currentId, 'shop');
+        }, 300);
+    }
 }
+
+async function reorderFeaturedProducts() {
+    // Get all featured products, ordered by featured_order
+    var featured = allProducts.filter(function(p) { return p.featured; });
+    // Sort by featured_order, then by name
+    featured.sort(function(a, b) {
+        var orderA = a.featured_order !== undefined && a.featured_order !== null ? a.featured_order : 999;
+        var orderB = b.featured_order !== undefined && b.featured_order !== null ? b.featured_order : 999;
+        if (orderA === orderB) {
+            return a.name.localeCompare(b.name);
+        }
+        return orderA - orderB;
+    });
+
+    // Reassign sequential order numbers
+    for (var i = 0; i < featured.length; i++) {
+        var newOrder = i + 1;
+        if (featured[i].featured_order !== newOrder) {
+            await supabase.from('products').update({ featured_order: newOrder }).eq('id', featured[i].id);
+        }
+    }
+}
+
 async function deleteProductConfirm(id, name) {
     if (!confirm('Delete "' + name + '" permanently?')) return;
     await supabase.from('products').delete().eq('id', id);
-    closeAdminModal(); showToast('Product deleted', 'success'); renderAdminPanels();
+    await loadDynamicData(true);
+    closeAdminModal();
+    showToast('Product deleted', 'success');
+    renderAdminPanels();
+    updateFeaturedProducts();
 }
 
 // ============ CATEGORY CRUD ============
 function showAddCategoryForm() { var html = '<h3>➕ Add Category</h3><label>Category Name</label><input id="ac-name" class="admin-input" placeholder="Name"><label>Emoji</label><input id="ac-emoji" class="admin-input" placeholder="e.g. 👞"><button class="btn-primary" style="width:100%" onclick="saveNewCategory()">Save</button>'; openAdminModal(html); }
-async function saveNewCategory() { var name = document.getElementById('ac-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').insert({ name: name, emoji: document.getElementById('ac-emoji').value.trim() || '📁', sort_order: allCategories.length + 1, owner_email: viewingAdminEmail || currentUserEmail }); closeAdminModal(); showToast('Category added!', 'success'); renderAdminPanels(); }
+async function saveNewCategory() { var name = document.getElementById('ac-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').insert({ name: name, emoji: document.getElementById('ac-emoji').value.trim() || '📁', sort_order: allCategories.length + 1, owner_email: viewingAdminEmail || currentUserEmail }); await loadDynamicData(true); closeAdminModal(); showToast('Category added!', 'success'); renderAdminPanels(); }
 function editCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; var html = '<h3>✏️ Edit Category</h3><label>Name</label><input id="ec-name" class="admin-input" value="' + cat.name + '"><label>Emoji</label><input id="ec-emoji" class="admin-input" value="' + (cat.emoji || '') + '"><button class="btn-primary" style="width:100%" onclick="saveEditCategory(\'' + id + '\')">Update</button>'; openAdminModal(html); }
-async function saveEditCategory(id) { var name = document.getElementById('ec-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').update({ name: name, emoji: document.getElementById('ec-emoji').value.trim() }).eq('id', id); closeAdminModal(); showToast('Updated!', 'success'); renderCategoriesListAdmin(); }
-async function deleteCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; if (!confirm('Delete "' + cat.name + '" and all its subcategories?')) return; await supabase.from('categories').delete().eq('id', id); showToast('Deleted!', 'success'); renderCategoriesListAdmin(); }
-async function moveCatUp(i) { if (i === 0) return; var a = allCategories[i], b = allCategories[i - 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); loadDynamicData(); renderCategoriesListAdmin(); }
-async function moveCatDown(i) { if (i >= allCategories.length - 1) return; var a = allCategories[i], b = allCategories[i + 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); loadDynamicData(); renderCategoriesListAdmin(); }
+async function saveEditCategory(id) { var name = document.getElementById('ec-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').update({ name: name, emoji: document.getElementById('ec-emoji').value.trim() }).eq('id', id); await loadDynamicData(true); closeAdminModal(); showToast('Updated!', 'success'); renderCategoriesListAdmin(); }
+async function deleteCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; if (!confirm('Delete "' + cat.name + '" and all its subcategories?')) return; await supabase.from('categories').delete().eq('id', id); await loadDynamicData(true); showToast('Deleted!', 'success'); renderCategoriesListAdmin(); }
+async function moveCatUp(i) { if (i === 0) return; var a = allCategories[i], b = allCategories[i - 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); await loadDynamicData(true); renderCategoriesListAdmin(); }
+async function moveCatDown(i) { if (i >= allCategories.length - 1) return; var a = allCategories[i], b = allCategories[i + 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); await loadDynamicData(true); renderCategoriesListAdmin(); }
 
 // ============ SUBCATEGORY CRUD ============
 function renderAddSubcategory(catId) { var html = '<h3>➕ Add Subcategory</h3><label>Name</label><input id="as-name" class="admin-input" placeholder="Subcategory Name"><button class="btn-primary" style="width:100%" onclick="saveNewSubcategory(\'' + catId + '\')">Save</button>'; openAdminModal(html); }
-async function saveNewSubcategory(catId) { var name = document.getElementById('as-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('subcategories').insert({ name: name, category_id: parseInt(catId), owner_email: viewingAdminEmail || currentUserEmail }); closeAdminModal(); showToast('Added!', 'success'); renderSubcategoriesAdmin(catId); }
+async function saveNewSubcategory(catId) { var name = document.getElementById('as-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('subcategories').insert({ name: name, category_id: parseInt(catId), owner_email: viewingAdminEmail || currentUserEmail }); await loadDynamicData(true); closeAdminModal(); showToast('Added!', 'success'); renderSubcategoriesAdmin(catId); }
 function editSubcategory(id) { var sub = allSubcategories.find(function(s) { return s.id == id; }); if (!sub) return; var html = '<h3>✏️ Edit Subcategory</h3><label>Name</label><input id="es-name" class="admin-input" value="' + sub.name + '"><button class="btn-primary" style="width:100%" onclick="saveEditSubcategory(\'' + id + '\')">Update</button>'; openAdminModal(html); }
-async function saveEditSubcategory(id) { var name = document.getElementById('es-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').update({ name: name }).eq('id', id); closeAdminModal(); showToast('Updated!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
-async function deleteSubcategory(id) { if (!confirm('Delete this subcategory and all its products?')) return; var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').delete().eq('id', id); showToast('Deleted!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
+async function saveEditSubcategory(id) { var name = document.getElementById('es-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').update({ name: name }).eq('id', id); await loadDynamicData(true); closeAdminModal(); showToast('Updated!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
+async function deleteSubcategory(id) { if (!confirm('Delete this subcategory and all its products?')) return; var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').delete().eq('id', id); await loadDynamicData(true); showToast('Deleted!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
 
 // ============ EMAIL CENTER ============
 function renderEmailCenter() {
@@ -1216,9 +1885,14 @@ function openCustomOrderPopup() {
     document.getElementById('custom-order-popup-subtitle').textContent = CONFIG.CUSTOM_ORDER_SUBTITLE;
     var form = document.getElementById('custom-order-form'); if (!form) return;
     var h = '';
-    for (var f = 0; f < CONFIG.CUSTOM_ORDER_FIELDS.length; f++) { var fd = CONFIG.CUSTOM_ORDER_FIELDS[f]; h += '<label style="font-size:13px;font-weight:500;margin-top:8px;display:block">' + fd.label + (fd.required ? ' *' : ' <span style="color:var(--text-muted)">(Optional)</span>') + '</label>'; if (fd.type === 'textarea') h += '<textarea name="co_' + f + '" placeholder="' + fd.placeholder + '" ' + (fd.required ? 'required' : '') + ' rows="3" style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;font-family:inherit;background:var(--bg-primary);color:var(--text-primary)"></textarea>'; else h += '<input type="' + fd.type + '" name="co_' + f + '" placeholder="' + fd.placeholder + '" ' + (fd.required ? 'required' : '') + ' style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;background:var(--bg-primary);color:var(--text-primary)">'; }
+    h += '<label style="font-size:13px;font-weight:500;margin-top:8px;display:block">Full Name *</label>';
+    h += '<input type="text" name="co_0" placeholder="Enter your full name" required style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;background:var(--bg-primary);color:var(--text-primary)">';
+    h += '<label style="font-size:13px;font-weight:500;margin-top:8px;display:block">Request Details *</label>';
+    h += '<textarea name="co_1" placeholder="Describe what you want (product, size, colour, customization, etc.)" required rows="3" style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;font-family:inherit;background:var(--bg-primary);color:var(--text-primary)"></textarea>';
     h += '<button type="submit" class="btn-submit-order"><i class="fab fa-whatsapp"></i> Send via WhatsApp</button>';
-    form.innerHTML = h; document.getElementById('custom-order-popup').style.display = 'flex'; document.body.style.overflow = 'hidden';
+    form.innerHTML = h;
+    document.getElementById('custom-order-popup').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
 }
 function closeCustomOrderPopup() { document.getElementById('custom-order-popup').style.display = 'none'; document.body.style.overflow = ''; }
 function submitCustomOrder(e) {
@@ -1270,6 +1944,11 @@ window.freezeAdmin = freezeAdmin; window.unfreezeAdmin = unfreezeAdmin; window.d
 window.renderSettings = renderSettings; window.saveAdminSettings = saveAdminSettings; window.saveCEOSettings = saveCEOSettings;
 window.saveAnnouncement = saveAnnouncement;
 window.renderAllProductsAdmin = renderAllProductsAdmin;
+window.toggleAllProducts = toggleAllProducts;
+window.updateBulkSelectUI = updateBulkSelectUI;
+window.bulkDeleteProducts = bulkDeleteProducts;
+window.bulkSetFeatured = bulkSetFeatured;
+window.bulkSetFeaturedOrder = bulkSetFeaturedOrder;
 window.renderCategoriesListAdmin = renderCategoriesListAdmin;
 window.renderSubcategoriesAdmin = renderSubcategoriesAdmin;
 window.renderSubProductsAdmin = renderSubProductsAdmin;
