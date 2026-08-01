@@ -2,7 +2,7 @@ var CONFIG = {
     SITE_NAME: "Abihani Express",
     SLOGAN: "MOM · DAD · UMMIHANI",
     FOOTER_TEXT: "Your perfect home for leather works",
-    LOGO_URL: "https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/logo.png",
+    LOGO_URL: "https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/abihanilogo.png",
     SITE_DOMAIN: "www.abihaniexpress.com.ng",
     SITE_URL: "https://www.abihaniexpress.com.ng",
     SOCIAL_SHARE_IMAGE: "https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/social-share.jpg",
