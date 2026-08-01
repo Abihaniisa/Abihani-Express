@@ -402,7 +402,7 @@ function generateMockData(count) {
     for (var j = 0; j < CONFIG.MOCK_DATA_SUBCATEGORIES.length; j++) { var sub = CONFIG.MOCK_DATA_SUBCATEGORIES[j]; mockSubcategories.push({ id: 'mock-sub-' + j, name: sub.name, category_id: 'mock-cat-' + sub.categoryIndex, owner_email: 'mock', is_mock: true }); }
     for (var k = 0; k < count; k++) {
         var rsi = Math.floor(Math.random() * mockSubcategories.length), rs = mockSubcategories[rsi], rni = Math.floor(Math.random() * CONFIG.MOCK_PRODUCT_NAMES.length), rii = Math.floor(Math.random() * CONFIG.MOCK_DATA_ICONS.length);
-        mockProducts.push({ id: 'mock-prod-' + k, name: CONFIG.MOCK_PRODUCT_NAMES[rni], price: Math.floor(Math.random() * 95000) + 5000, category_id: rs.category_id, subcategory_id: rs.id, description: 'Mock product for display.', image_url: '', image_urls: '[]', image_icon: CONFIG.MOCK_DATA_ICONS[rii], rating: parseFloat((Math.random() * 2 + 3).toFixed(1)), review_count: Math.floor(Math.random() * 235) + 12, stock_quantity: Math.floor(Math.random() * 50) + 1, discount_percent: Math.random() < 0.3 ? Math.floor(Math.random() * 40) + 5 : 0, vendor: CONFIG.PRODUCT_DEFAULT_VENDOR, location: CONFIG.PRODUCT_DEFAULT_LOCATION, featured: Math.random() < (CONFIG.MOCK_DATA_FEATURE_PERCENT / 100), owner_email: 'mock', owner_whatsapp: CONFIG.WHATSAPP_NUMBER, is_mock: true });
+        mockProducts.push({ id: 'mock-prod-' + k, name: CONFIG.MOCK_PRODUCT_NAMES[rni], price: Math.floor(Math.random() * 95000) + 5000, category_id: rs.category_id, subcategory_id: rs.id, description: 'Mock product for display.', image_url: '', image_urls: '[]', image_icon: CONFIG.MOCK_DATA_ICONS[rii], rating: parseFloat((Math.random() * 2 + 3).toFixed(1)), review_count: Math.floor(Math.random() * 235) + 12, stock_quantity: Math.floor(Math.random() * 50) + 1, discount_percent: Math.random() < 0.3 ? Math.floor(Math.random() * 40) + 5 : 0, vendor: CONFIG.PRODUCT_DEFAULT_VENDOR, location: CONFIG.PRODUCT_DEFAULT_LOCATION, featured: Math.random() < (CONFIG.MOCK_DATA_FEATURE_PERCENT / 100), featured_order: 0, owner_email: 'mock', owner_whatsapp: CONFIG.WHATSAPP_NUMBER, is_mock: true });
     }
 }
 function mergeMockData() {
@@ -644,329 +644,44 @@ function productCardHTML(p) {
     return '<div class="product-card" onclick="showProductDetail(\'' + p.id + '\', \'shop\')"><div class="product-image">' + imgHtml + '</div><div class="product-info"><h4>' + (p.name || '') + '</h4>' + priceHtml + '<div class="product-rating">' + stars + ' (' + rc + ')</div><div class="product-vendor"><i class="fas fa-store"></i> ' + (p.vendor || CONFIG.PRODUCT_DEFAULT_VENDOR) + '</div><button class="btn-wa-small" onclick="event.stopPropagation();buyNow(\'' + p.id + '\')"><i class="fab fa-whatsapp"></i> ' + CONFIG.UI_BUY_NOW + '</button></div></div>';
 }
 
-// ============ FEATURED PRODUCTS CAROUSEL — COMPLETELY REWRITTEN ============
-var featuredCarouselInterval = null;
-var featuredCarouselResumeTimer = null;
-var featuredCarouselPauseTimer = null;
-var featuredCarouselData = null;
-
+// ============ FEATURED PRODUCTS - HORIZONTAL SCROLL LIST (NO CAROUSEL) ============
 function updateFeaturedProducts() {
     var container = document.getElementById('featured-products');
     if (!container) return;
 
-    // Clean up any existing carousel state
-    if (featuredCarouselInterval) {
-        clearInterval(featuredCarouselInterval);
-        featuredCarouselInterval = null;
-    }
-    if (featuredCarouselResumeTimer) {
-        clearTimeout(featuredCarouselResumeTimer);
-        featuredCarouselResumeTimer = null;
-    }
-    if (featuredCarouselPauseTimer) {
-        clearTimeout(featuredCarouselPauseTimer);
-        featuredCarouselPauseTimer = null;
-    }
-    featuredCarouselData = null;
-
-    // Get featured products and shuffle
+    // Get featured products and sort by featured_order
     var featured = allProducts.filter(function(p) { return p.featured; });
-    featured = featured.sort(function() { return 0.5 - Math.random(); });
 
     if (featured.length === 0) {
         container.innerHTML = '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.UI_NO_FEATURED_PRODUCTS + '</p></div>';
         return;
     }
 
-    // Determine how many products fit per slide
-    var perSlide = determineVisiblePerSlide();
-
-    // Create perfectly balanced groups with NO BLANK SLIDES
-    var groups = createPerfectGroups(featured, perSlide);
-
-    var totalGroups = groups.length;
-    if (totalGroups === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.UI_NO_FEATURED_PRODUCTS + '</p></div>';
-        return;
-    }
-
-    // Build the carousel HTML
-    var html = '<div class="featured-carousel" id="featured-carousel-container">';
-    html += '<div class="featured-carousel-track" id="featured-carousel-track">';
-    for (var g = 0; g < totalGroups; g++) {
-        html += '<div class="featured-carousel-slide">';
-        for (var p = 0; p < groups[g].length; p++) {
-            html += productCardHTML(groups[g][p]);
+    // Sort by featured_order (ascending), then by name as fallback
+    featured.sort(function(a, b) {
+        var orderA = a.featured_order !== undefined && a.featured_order !== null ? a.featured_order : 999;
+        var orderB = b.featured_order !== undefined && b.featured_order !== null ? b.featured_order : 999;
+        if (orderA === orderB) {
+            return a.name.localeCompare(b.name);
         }
-        html += '</div>';
+        return orderA - orderB;
+    });
+
+    // Build the horizontal scrollable list - NO CAROUSEL, just a scrollable flex container
+    var html = '<div class="featured-scroll-container" style="display:flex;overflow-x:auto;gap:14px;padding:4px 4px 12px;scrollbar-width:thin;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;">';
+
+    for (var i = 0; i < featured.length; i++) {
+        html += '<div style="flex:0 0 200px;scroll-snap-align:start;min-width:160px;max-width:250px;">' + productCardHTML(featured[i]) + '</div>';
     }
+
     html += '</div>';
 
-    // Only show controls if more than one group
-    if (totalGroups > 1) {
-        html += '<button class="carousel-arrow carousel-prev" onclick="moveFeaturedCarousel(-1)"><i class="fas fa-chevron-left"></i></button>';
-        html += '<button class="carousel-arrow carousel-next" onclick="moveFeaturedCarousel(1)"><i class="fas fa-chevron-right"></i></button>';
-        html += '<div class="carousel-dots" id="featured-carousel-dots"></div>';
+    // Add scroll hint if there are more products than fit
+    if (featured.length > 3) {
+        html += '<div style="text-align:center;font-size:11px;color:var(--text-muted);margin-top:4px;">← Scroll to see more →</div>';
     }
-    html += '</div>';
+
     container.innerHTML = html;
-
-    // Setup carousel
-    var track = document.getElementById('featured-carousel-track');
-    if (!track) return;
-
-    // IMPORTANT: Force the track to use flex row (horizontal)
-    track.style.display = 'flex';
-    track.style.flexDirection = 'row';
-    track.style.flexWrap = 'nowrap';
-    track.style.width = (totalGroups * 100) + '%';
-    track.style.transition = 'transform 0.5s ease';
-
-    var slides = track.querySelectorAll('.featured-carousel-slide');
-    for (var i = 0; i < slides.length; i++) {
-        // Each slide takes equal width and displays cards horizontally
-        slides[i].style.display = 'flex';
-        slides[i].style.flexDirection = 'row';
-        slides[i].style.flexWrap = 'nowrap';
-        slides[i].style.flexShrink = '0';
-        slides[i].style.width = (100 / totalGroups) + '%';
-        slides[i].style.gap = '14px';
-        slides[i].style.padding = '0 4px';
-        slides[i].style.justifyContent = 'center';
-        slides[i].style.alignItems = 'stretch';
-
-        // Each product card inside the slide should flex properly
-        var cards = slides[i].querySelectorAll('.product-card');
-        var cardWidth = 100 / cards.length;
-        for (var c = 0; c < cards.length; c++) {
-            cards[c].style.flex = '0 0 ' + cardWidth + '%';
-            cards[c].style.maxWidth = cardWidth + '%';
-            cards[c].style.minWidth = '120px';
-        }
-    }
-
-    // Create dots if more than one group
-    if (totalGroups > 1) {
-        var dotsContainer = document.getElementById('featured-carousel-dots');
-        if (dotsContainer) {
-            dotsContainer.innerHTML = '';
-            for (var d = 0; d < totalGroups; d++) {
-                var dot = document.createElement('span');
-                dot.className = 'carousel-dot' + (d === 0 ? ' active' : '');
-                dot.onclick = (function(idx) { return function() { goToFeaturedSlide(idx); }; })(d);
-                dotsContainer.appendChild(dot);
-            }
-        }
-    }
-
-    // Store carousel data
-    featuredCarouselData = {
-        track: track,
-        totalGroups: totalGroups,
-        currentIndex: 0,
-        isPaused: false,
-        perSlide: perSlide,
-        groups: groups,
-        slides: slides
-    };
-
-    // Event listeners for pause/resume
-    var carouselContainer = container.querySelector('.featured-carousel');
-    if (carouselContainer) {
-        carouselContainer.addEventListener('mouseenter', pauseFeaturedCarousel);
-        carouselContainer.addEventListener('mouseleave', resumeFeaturedCarousel);
-        carouselContainer.addEventListener('touchstart', function(e) {
-            pauseFeaturedCarousel();
-            var touch = e.touches[0];
-            var startX = touch.clientX;
-            var startY = touch.clientY;
-            var handleTouchEnd = function(ev) {
-                var endX = ev.changedTouches[0].clientX;
-                var endY = ev.changedTouches[0].clientY;
-                var dx = startX - endX;
-                var dy = startY - endY;
-                if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 30) {
-                    if (dx > 0) moveFeaturedCarousel(1);
-                    else moveFeaturedCarousel(-1);
-                }
-                document.removeEventListener('touchend', handleTouchEnd);
-                setTimeout(resumeFeaturedCarousel, 10000);
-            };
-            document.addEventListener('touchend', handleTouchEnd);
-        });
-    }
-
-    // Start autoplay if more than one group
-    if (totalGroups > 1) {
-        featuredCarouselInterval = setInterval(function() {
-            moveFeaturedCarousel(1);
-        }, CONFIG.FEATURED_CAROUSEL_INTERVAL || 5000);
-    }
-}
-
-function determineVisiblePerSlide() {
-    var container = document.getElementById('featured-products');
-    if (!container) return CONFIG.FEATURED_CAROUSEL_VISIBLE || 3;
-
-    var width = container.offsetWidth;
-    if (width === 0) return CONFIG.FEATURED_CAROUSEL_VISIBLE || 3;
-
-    // Each product card needs minimum width
-    // On mobile: ~150px, on desktop: ~200px
-    var cardWidth = width < 768 ? 150 : 200;
-    var cardGap = 14;
-    var cardTotalWidth = cardWidth + cardGap;
-
-    var maxVisible = Math.max(1, Math.floor((width + cardGap) / cardTotalWidth));
-
-    // Clamp to reasonable bounds
-    var minVisible = 1;
-    var maxAllowed = 5;
-    var visible = Math.max(minVisible, Math.min(maxAllowed, maxVisible));
-
-    return visible;
-}
-
-function createPerfectGroups(products, perSlide) {
-    var total = products.length;
-
-    // If total is 0, return empty array
-    if (total === 0) return [];
-
-    // If total <= perSlide, all products go in one group
-    if (total <= perSlide) {
-        return [products.slice()];
-    }
-
-    // Calculate optimal number of groups
-    // We want to minimize the number of groups while keeping them balanced
-    var numGroups = Math.ceil(total / perSlide);
-
-    // Ensure we don't create more groups than products
-    if (numGroups > total) numGroups = total;
-
-    // Calculate the ideal group size
-    var idealSize = Math.ceil(total / numGroups);
-
-    // Create groups with the ideal size
-    var groups = [];
-    var remaining = total;
-    var start = 0;
-
-    while (remaining > 0) {
-        // For the last group, take all remaining products
-        // For other groups, take the ideal size
-        var size = (remaining <= idealSize) ? remaining : idealSize;
-
-        // But ensure we don't leave too few for the last group
-        // If the remaining products after this group would be 1, and there are other groups after,
-        // adjust to make the last group more balanced
-        var remainingAfter = remaining - size;
-        if (remainingAfter > 0 && remainingAfter < idealSize / 2) {
-            // Move some products to the last group to balance
-            var adjust = Math.min(idealSize / 2 - remainingAfter, size - 1);
-            if (adjust > 0) {
-                size = size - adjust;
-            }
-        }
-
-        var group = products.slice(start, start + size);
-        groups.push(group);
-        start += size;
-        remaining -= size;
-    }
-
-    // Final check: ensure no group is empty
-    groups = groups.filter(function(g) { return g.length > 0; });
-
-    return groups;
-}
-
-function moveFeaturedCarousel(direction) {
-    var data = featuredCarouselData;
-    if (!data) return;
-    if (data.isPaused) return;
-
-    var newIndex = data.currentIndex + direction;
-
-    // Wrap around
-    if (newIndex < 0) newIndex = data.totalGroups - 1;
-    if (newIndex >= data.totalGroups) newIndex = 0;
-
-    goToFeaturedSlide(newIndex);
-}
-
-function goToFeaturedSlide(index) {
-    var data = featuredCarouselData;
-    if (!data) return;
-
-    // Validate index
-    if (index < 0 || index >= data.totalGroups) {
-        index = 0;
-    }
-
-    data.currentIndex = index;
-    var percent = -(index * 100);
-    data.track.style.transform = 'translateX(' + percent + '%)';
-
-    var dots = document.querySelectorAll('.carousel-dot');
-    for (var i = 0; i < dots.length; i++) {
-        dots[i].classList.toggle('active', i === index);
-    }
-}
-
-function pauseFeaturedCarousel() {
-    var data = featuredCarouselData;
-    if (!data) return;
-    if (data.isPaused) return;
-
-    data.isPaused = true;
-
-    if (featuredCarouselInterval) {
-        clearInterval(featuredCarouselInterval);
-        featuredCarouselInterval = null;
-    }
-
-    if (featuredCarouselResumeTimer) {
-        clearTimeout(featuredCarouselResumeTimer);
-        featuredCarouselResumeTimer = null;
-    }
-}
-
-function resumeFeaturedCarousel() {
-    var data = featuredCarouselData;
-    if (!data) return;
-
-    if (!data.isPaused && featuredCarouselInterval) return;
-
-    if (featuredCarouselResumeTimer) {
-        clearTimeout(featuredCarouselResumeTimer);
-        featuredCarouselResumeTimer = null;
-    }
-
-    featuredCarouselResumeTimer = setTimeout(function() {
-        var dataCheck = featuredCarouselData;
-        if (!dataCheck) return;
-
-        dataCheck.isPaused = false;
-        featuredCarouselResumeTimer = null;
-
-        if (dataCheck.totalGroups > 1) {
-            if (featuredCarouselInterval) {
-                clearInterval(featuredCarouselInterval);
-                featuredCarouselInterval = null;
-            }
-            featuredCarouselInterval = setInterval(function() {
-                moveFeaturedCarousel(1);
-            }, CONFIG.FEATURED_CAROUSEL_INTERVAL || 5000);
-        }
-    }, 10000);
-}
-
-function renderAllProducts() {
-    var c = document.getElementById('all-products-grid'); if (!c) return;
-    var items = currentFilterCategory ? allProducts.filter(function(p) { return p.category_id == currentFilterCategory; }) : allProducts;
-    c.innerHTML = items.length ? items.map(productCardHTML).join('') : '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.EMPTY_PRODUCTS + '</p></div>';
 }
 
 // ============ PRODUCT DETAIL ============
@@ -1468,7 +1183,7 @@ async function saveAnnouncement() {
     showToast('Announcement saved!', 'success');
 }
 
-// ============ ALL PRODUCTS (ADMIN) WITH BULK DELETE ============
+// ============ ALL PRODUCTS (ADMIN) WITH BULK ACTIONS ============
 function renderAllProductsAdmin() {
     var ownerFilter = viewingAdminEmail || currentUserEmail;
     var prods = allProducts.filter(function(p) { return currentUserIsCEO && !viewingAdminEmail ? !p.is_mock : (p.owner_email === ownerFilter && !p.is_mock); });
@@ -1481,8 +1196,18 @@ function renderAllProductsAdmin() {
 
     html += '<div class="bulk-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:var(--bg-secondary);border-radius:var(--radius-sm);">';
     html += '<label style="font-size:13px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="select-all-products" onchange="toggleAllProducts()"> Select All</label>';
-    html += '<button class="btn-danger btn-sm" id="delete-selected-btn" onclick="bulkDeleteProducts()" disabled>🗑️ Delete Selected</button>';
+    html += '<button class="btn-danger btn-sm" id="bulk-delete-btn" onclick="bulkDeleteProducts()" disabled>🗑️ Delete</button>';
+    html += '<button class="btn-primary btn-sm" id="bulk-featured-btn" onclick="bulkSetFeatured(true)" disabled>⭐ Set Featured</button>';
+    html += '<button class="btn-secondary btn-sm" id="bulk-unfeatured-btn" onclick="bulkSetFeatured(false)" disabled>☆ Remove Featured</button>';
     html += '<span id="selected-count" style="font-size:12px;color:var(--text-muted);margin-left:auto;">0 selected</span>';
+    html += '</div>';
+
+    // Add featured order management section
+    html += '<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-secondary);border-radius:var(--radius-sm);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+    html += '<span style="font-size:12px;font-weight:600;">⚡ Featured Order:</span>';
+    html += '<input type="number" id="featured-order-input" value="1" min="1" style="width:60px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);">';
+    html += '<button class="btn-primary btn-sm" onclick="bulkSetFeaturedOrder()">Update Order</button>';
+    html += '<span style="font-size:10px;color:var(--text-muted);margin-left:4px;">(Set order for selected products)</span>';
     html += '</div>';
 
     if (prods.length === 0) {
@@ -1491,6 +1216,7 @@ function renderAllProductsAdmin() {
         for (var i = 0; i < prods.length; i++) {
             var p = prods[i];
             var displayPrice = getDisplayPrice(p);
+            var orderDisplay = (p.featured_order !== undefined && p.featured_order !== null) ? ' #' + p.featured_order : '';
 
             html += '<div class="item-row" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);">';
             html += '<input type="checkbox" class="product-select-checkbox" data-id="' + p.id + '" onchange="updateBulkSelectUI()">';
@@ -1498,7 +1224,7 @@ function renderAllProductsAdmin() {
             html += (p.image_url ? '<img src="' + p.image_url + '" style="width:40px;height:40px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle">' : '<span style="font-size:24px;margin-right:8px;vertical-align:middle">' + (p.image_icon || '📦') + '</span>');
             html += '<strong>' + p.name + '</strong>';
             html += '<br><small style="color:var(--accent)">' + displayPrice + '</small>';
-            if (p.featured) html += ' ⭐';
+            if (p.featured) html += ' ⭐' + orderDisplay;
             html += '</div>';
             html += '<span style="font-size:20px;color:var(--accent);">›</span>';
             html += '</div>';
@@ -1529,8 +1255,11 @@ function updateBulkSelectUI() {
     var count = checked.length;
     var countEl = document.getElementById('selected-count');
     if (countEl) countEl.textContent = count + ' selected';
-    var btn = document.getElementById('delete-selected-btn');
-    if (btn) btn.disabled = count === 0;
+    var btns = ['bulk-delete-btn', 'bulk-featured-btn', 'bulk-unfeatured-btn'];
+    for (var b = 0; b < btns.length; b++) {
+        var btn = document.getElementById(btns[b]);
+        if (btn) btn.disabled = count === 0;
+    }
     var selectAll = document.getElementById('select-all-products');
     if (selectAll) {
         var total = checkboxes.length;
@@ -1559,9 +1288,81 @@ function bulkDeleteProducts() {
         }
         loadDynamicData(true).then(function() {
             renderAllProductsAdmin();
+            updateFeaturedProducts();
         });
     }).catch(function() {
         showToast('Error deleting products. Please try again.', 'error');
+    });
+}
+
+function bulkSetFeatured(featured) {
+    if (selectedProductIds.length === 0) return;
+    var action = featured ? 'feature' : 'unfeature';
+    if (!confirm('Set ' + selectedProductIds.length + ' products as ' + (featured ? 'featured' : 'not featured') + '?')) return;
+
+    var promises = [];
+    for (var i = 0; i < selectedProductIds.length; i++) {
+        var updateData = { featured: featured };
+        if (featured) {
+            // Set a default order if featuring
+            updateData.featured_order = 0;
+        } else {
+            updateData.featured_order = null;
+        }
+        promises.push(supabase.from('products').update(updateData).eq('id', selectedProductIds[i]));
+    }
+
+    Promise.all(promises).then(function(results) {
+        var successCount = results.filter(function(r) { return !r.error; }).length;
+        if (successCount === selectedProductIds.length) {
+            showToast(selectedProductIds.length + ' products ' + (featured ? 'featured!' : 'unfeatured!'), 'success');
+        } else {
+            showToast(successCount + ' of ' + selectedProductIds.length + ' updated. Some failed.', 'error');
+        }
+        // Reset selection
+        selectedProductIds = [];
+        loadDynamicData(true).then(function() {
+            renderAllProductsAdmin();
+            updateFeaturedProducts();
+            updateBulkSelectUI();
+        });
+    }).catch(function() {
+        showToast('Error updating products.', 'error');
+    });
+}
+
+function bulkSetFeaturedOrder() {
+    if (selectedProductIds.length === 0) return;
+    var orderInput = document.getElementById('featured-order-input');
+    var startOrder = parseInt(orderInput.value) || 1;
+    if (startOrder < 1) startOrder = 1;
+
+    if (!confirm('Set featured order starting from ' + startOrder + ' for ' + selectedProductIds.length + ' selected products?')) return;
+
+    var promises = [];
+    for (var i = 0; i < selectedProductIds.length; i++) {
+        var order = startOrder + i;
+        promises.push(supabase.from('products').update({
+            featured: true,
+            featured_order: order
+        }).eq('id', selectedProductIds[i]));
+    }
+
+    Promise.all(promises).then(function(results) {
+        var successCount = results.filter(function(r) { return !r.error; }).length;
+        if (successCount === selectedProductIds.length) {
+            showToast(selectedProductIds.length + ' products order updated!', 'success');
+        } else {
+            showToast(successCount + ' of ' + selectedProductIds.length + ' updated. Some failed.', 'error');
+        }
+        selectedProductIds = [];
+        loadDynamicData(true).then(function() {
+            renderAllProductsAdmin();
+            updateFeaturedProducts();
+            updateBulkSelectUI();
+        });
+    }).catch(function() {
+        showToast('Error updating product order.', 'error');
     });
 }
 
@@ -1659,6 +1460,7 @@ async function saveNewProduct() {
         vendor: document.getElementById('ap-vendor').value.trim() || 'Abihani Express',
         location: document.getElementById('ap-location').value.trim() || 'Potiskum, Yobe State',
         featured: document.getElementById('ap-featured').checked,
+        featured_order: document.getElementById('ap-featured').checked ? 0 : null,
         image_url: mainUrl,
         image_urls: JSON.stringify(extraUrls),
         image_icon: '📦',
@@ -1855,6 +1657,7 @@ async function processBulkUpload() {
                 vendor: CONFIG.BULK_UPLOAD_DEFAULTS.vendor,
                 location: CONFIG.BULK_UPLOAD_DEFAULTS.location,
                 featured: CONFIG.BULK_UPLOAD_DEFAULTS.featured,
+                featured_order: CONFIG.BULK_UPLOAD_DEFAULTS.featured ? 0 : null,
                 owner_email: ownerEmail,
                 owner_whatsapp: ''
             });
@@ -1898,10 +1701,13 @@ function renderEditProduct(id) {
     html += '<label>Vendor</label><input id="ep-vendor" class="admin-input" value="' + (p.vendor || '') + '">';
     html += '<label>Location</label><input id="ep-location" class="admin-input" value="' + (p.location || '') + '">';
     html += '<label style="font-size:12px"><input type="checkbox" id="ep-featured" ' + (p.featured ? 'checked' : '') + '> Featured</label>';
-    if (p.image_url) { html += '<label>Current Image</label><div><img src="' + p.image_url + '" class="image-preview"><button class="btn-danger btn-sm" onclick="removeMainImage()">✕ Remove</button></div>'; }
+    html += '<label>Featured Order <span style="color:var(--text-muted);font-weight:400;">(Lower number = appears first)</span></label>';
+    var orderVal = (p.featured_order !== undefined && p.featured_order !== null) ? p.featured_order : '';
+    html += '<input id="ep-featured-order" class="admin-input" type="number" value="' + orderVal + '" placeholder="Leave blank for auto" min="0">';
+    if (p.image_url) { html += '<label>Current Image</label><div><img src="' + p.image_url + '" class="image-preview" style="max-width:150px;max-height:150px;border-radius:8px;object-fit:cover;border:1px solid var(--border);"><button class="btn-danger btn-sm" onclick="removeMainImage()">✕ Remove</button></div>'; }
     html += '<label>New Main Image</label><input type="file" id="ep-main-image" accept="image/*" class="admin-input"><input type="hidden" id="ep-image-removed" value="false">';
     html += '<label>Side Images</label><div id="side-images-container">';
-    for (var i = 0; i < sideUrls.length; i++) { html += '<div data-index="' + i + '" style="display:flex;align-items:center;gap:8px;margin:4px 0"><img src="' + sideUrls[i] + '" class="image-preview"><button class="btn-danger btn-sm" onclick="removeSideRow(this)">✕</button></div>'; }
+    for (var i = 0; i < sideUrls.length; i++) { html += '<div data-index="' + i + '" style="display:flex;align-items:center;gap:8px;margin:4px 0"><img src="' + sideUrls[i] + '" class="image-preview" style="max-width:80px;max-height:80px;border-radius:4px;object-fit:cover;border:1px solid var(--border);"><button class="btn-danger btn-sm" onclick="removeSideRow(this)">✕</button></div>'; }
     html += '</div><input type="hidden" id="side-removed" value="[]"><button class="btn-outline btn-sm" onclick="addSidePicker()">+ Add Image</button>';
     html += '<button class="btn-primary" style="width:100%;margin-top:12px" onclick="saveEditProduct(\'' + p.id + '\')">💾 Save Changes</button>';
     html += '<button class="btn-danger" style="width:100%;margin-top:8px" onclick="deleteProductConfirm(\'' + p.id + '\',\'' + p.name.replace(/'/g,"\\'") + '\')">🗑️ Delete Product</button>';
@@ -1926,6 +1732,19 @@ async function saveEditProduct(id) {
         price = '₦' + priceNumeric.toLocaleString();
     }
 
+    var featured = document.getElementById('ep-featured').checked;
+    var featuredOrder = document.getElementById('ep-featured-order').value;
+    var featuredOrderNum = (featuredOrder !== '' && !isNaN(parseInt(featuredOrder))) ? parseInt(featuredOrder) : null;
+
+    // If featured is checked but no order is set, use 0 (will be reordered on save)
+    if (featured && featuredOrderNum === null) {
+        featuredOrderNum = 0;
+    }
+    // If not featured, order should be null
+    if (!featured) {
+        featuredOrderNum = null;
+    }
+
     var updates = {
         name: name,
         price: price,
@@ -1939,7 +1758,8 @@ async function saveEditProduct(id) {
         discount_percent: parseInt(document.getElementById('ep-discount').value) || 0,
         vendor: document.getElementById('ep-vendor').value.trim() || 'Abihani Express',
         location: document.getElementById('ep-location').value.trim() || 'Potiskum, Yobe State',
-        featured: document.getElementById('ep-featured').checked
+        featured: featured,
+        featured_order: featuredOrderNum
     };
 
     if (document.getElementById('ep-image-removed').value === 'true') { updates.image_url = ''; updates.image_icon = '📦'; }
@@ -1957,6 +1777,11 @@ async function saveEditProduct(id) {
         return;
     }
 
+    // If featured is true, reorder all featured products to maintain sequence
+    if (featured) {
+        await reorderFeaturedProducts();
+    }
+
     // Invalidate cache and reload fresh data
     await loadDynamicData(true);
 
@@ -1965,6 +1790,7 @@ async function saveEditProduct(id) {
 
     // Re-render the admin dashboard with fresh data
     renderAdminPanels();
+    updateFeaturedProducts();
 
     // If we're viewing the product detail page, refresh it
     if (document.getElementById('product-detail-page').classList.contains('active-page')) {
@@ -1974,6 +1800,29 @@ async function saveEditProduct(id) {
         }, 300);
     }
 }
+
+async function reorderFeaturedProducts() {
+    // Get all featured products, ordered by featured_order
+    var featured = allProducts.filter(function(p) { return p.featured; });
+    // Sort by featured_order, then by name
+    featured.sort(function(a, b) {
+        var orderA = a.featured_order !== undefined && a.featured_order !== null ? a.featured_order : 999;
+        var orderB = b.featured_order !== undefined && b.featured_order !== null ? b.featured_order : 999;
+        if (orderA === orderB) {
+            return a.name.localeCompare(b.name);
+        }
+        return orderA - orderB;
+    });
+
+    // Reassign sequential order numbers
+    for (var i = 0; i < featured.length; i++) {
+        var newOrder = i + 1;
+        if (featured[i].featured_order !== newOrder) {
+            await supabase.from('products').update({ featured_order: newOrder }).eq('id', featured[i].id);
+        }
+    }
+}
+
 async function deleteProductConfirm(id, name) {
     if (!confirm('Delete "' + name + '" permanently?')) return;
     await supabase.from('products').delete().eq('id', id);
@@ -1981,6 +1830,7 @@ async function deleteProductConfirm(id, name) {
     closeAdminModal();
     showToast('Product deleted', 'success');
     renderAdminPanels();
+    updateFeaturedProducts();
 }
 
 // ============ CATEGORY CRUD ============
@@ -2106,6 +1956,11 @@ window.freezeAdmin = freezeAdmin; window.unfreezeAdmin = unfreezeAdmin; window.d
 window.renderSettings = renderSettings; window.saveAdminSettings = saveAdminSettings; window.saveCEOSettings = saveCEOSettings;
 window.saveAnnouncement = saveAnnouncement;
 window.renderAllProductsAdmin = renderAllProductsAdmin;
+window.toggleAllProducts = toggleAllProducts;
+window.updateBulkSelectUI = updateBulkSelectUI;
+window.bulkDeleteProducts = bulkDeleteProducts;
+window.bulkSetFeatured = bulkSetFeatured;
+window.bulkSetFeaturedOrder = bulkSetFeaturedOrder;
 window.renderCategoriesListAdmin = renderCategoriesListAdmin;
 window.renderSubcategoriesAdmin = renderSubcategoriesAdmin;
 window.renderSubProductsAdmin = renderSubProductsAdmin;
