@@ -249,15 +249,14 @@ var CONFIG = {
         }
     ],
 
-    // Custom Order Form
+    // Custom Order Form — UPDATED to 2 fields
     CUSTOM_ORDER_TITLE: "Custom Order Request",
     CUSTOM_ORDER_SUBTITLE: "Fill this form and we'll WhatsApp you within minutes to confirm.",
     CUSTOM_ORDER_OPTIONAL_LABEL: "(Optional)",
     CUSTOM_ORDER_FIELDS: [
-    { label: "Full Name", type: "text", required: true, placeholder: "Enter your full name" },
-    { label: "Request Details", type: "textarea", required: true, placeholder: "Describe what you want (product, size, colour, customization, etc.)" }
-],
-    
+        { label: "Full Name", type: "text", required: true, placeholder: "Enter your full name" },
+        { label: "Request Details", type: "textarea", required: true, placeholder: "Describe what you want (product, size, colour, customization, etc.)" }
+    ],
 
     // Terms & Privacy
     TERMS_TITLE: "Terms and Conditions",
@@ -318,21 +317,23 @@ var CONFIG = {
     // Mock Data
     MOCK_DATA_ENABLED: true,
     MOCK_DATA_PRODUCT_COUNT: 20,
-    // Bulk upload defaults
-BULK_UPLOAD_DEFAULTS: {
-    name: "Untitled Product",
-    category: "More Products",
-    description: "",
-    price: "Ask on WhatsApp",
-    vendor: "Abihani Express",
-    rating: 4.5,
-    review_count: 0,
-    stock_quantity: 10,
-    discount_percent: 0,
-    featured: false,
-    location: "Potiskum, Yobe State"
-},
     MOCK_DATA_FEATURE_PERCENT: 25,
+
+    // Bulk Upload Defaults
+    BULK_UPLOAD_DEFAULTS: {
+        name: "Untitled Product",
+        category: "More Products",
+        description: "",
+        price: "Ask on WhatsApp",
+        vendor: "Abihani Express",
+        rating: 4.5,
+        review_count: 0,
+        stock_quantity: 10,
+        discount_percent: 0,
+        featured: false,
+        location: "Potiskum, Yobe State"
+    },
+
     MOCK_DATA_CATEGORIES: [
         { name: "👞 Men's Footwear", emoji: "👞" },
         { name: "👢 Women's Footwear", emoji: "👢" },
