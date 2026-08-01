@@ -39,6 +39,7 @@ function showToast(msg, type) {
     t.addEventListener('click', function() { t.remove(); });
     setTimeout(function() { if (t.parentElement) t.remove(); }, 6000);
 }
+
 // ============ DATA CACHING UTILITIES ============
 function getCachedData(key) {
     try {
@@ -59,6 +60,10 @@ function setCachedData(key, data) {
     try {
         localStorage.setItem(key, JSON.stringify(data));
     } catch(e) {}
+}
+
+function invalidateCache() {
+    localStorage.removeItem('abihani_products_cache');
 }
 
 // ============ PRICE DISPLAY UTILITY ============
@@ -299,9 +304,12 @@ function showAllSkeletons() {
 }
 
 // ============ LOAD DATA ============
-async function loadDynamicData() {
+async function loadDynamicData(forceRefresh) {
+    if (forceRefresh) {
+        invalidateCache();
+    }
     var cacheData = getCachedData('abihani_products_cache');
-    if (cacheData) {
+    if (cacheData && !forceRefresh) {
         allCategories = cacheData.categories || [];
         allSubcategories = cacheData.subcategories || [];
         allProducts = cacheData.products || [];
@@ -636,15 +644,17 @@ function productCardHTML(p) {
     return '<div class="product-card" onclick="showProductDetail(\'' + p.id + '\', \'shop\')"><div class="product-image">' + imgHtml + '</div><div class="product-info"><h4>' + (p.name || '') + '</h4>' + priceHtml + '<div class="product-rating">' + stars + ' (' + rc + ')</div><div class="product-vendor"><i class="fas fa-store"></i> ' + (p.vendor || CONFIG.PRODUCT_DEFAULT_VENDOR) + '</div><button class="btn-wa-small" onclick="event.stopPropagation();buyNow(\'' + p.id + '\')"><i class="fab fa-whatsapp"></i> ' + CONFIG.UI_BUY_NOW + '</button></div></div>';
 }
 
-// ============ FEATURED PRODUCTS CAROUSEL — COMPLETELY FIXED ============
+// ============ FEATURED PRODUCTS CAROUSEL — COMPLETELY REWRITTEN ============
 var featuredCarouselInterval = null;
 var featuredCarouselResumeTimer = null;
+var featuredCarouselPauseTimer = null;
+var featuredCarouselData = null;
 
 function updateFeaturedProducts() {
-    var c = document.getElementById('featured-products');
-    if (!c) return;
+    var container = document.getElementById('featured-products');
+    if (!container) return;
 
-    // STEP 1: DESTROY everything — prevent any stale state
+    // Clean up any existing carousel state
     if (featuredCarouselInterval) {
         clearInterval(featuredCarouselInterval);
         featuredCarouselInterval = null;
@@ -653,121 +663,232 @@ function updateFeaturedProducts() {
         clearTimeout(featuredCarouselResumeTimer);
         featuredCarouselResumeTimer = null;
     }
-    window._featuredCarousel = null;
+    if (featuredCarouselPauseTimer) {
+        clearTimeout(featuredCarouselPauseTimer);
+        featuredCarouselPauseTimer = null;
+    }
+    featuredCarouselData = null;
 
-    // STEP 2: Get featured products
-    var feat = allProducts.filter(function(p) { return p.featured; });
-    feat = feat.sort(function() { return 0.5 - Math.random(); });
+    // Get featured products and shuffle
+    var featured = allProducts.filter(function(p) { return p.featured; });
+    featured = featured.sort(function() { return 0.5 - Math.random(); });
 
-    // STEP 3: Empty state
-    if (feat.length === 0) {
-        c.innerHTML = '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.UI_NO_FEATURED_PRODUCTS + '</p></div>';
+    if (featured.length === 0) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.UI_NO_FEATURED_PRODUCTS + '</p></div>';
         return;
     }
 
-    // STEP 4: Calculate correctly — ALWAYS dynamic
-    var totalSlides = feat.length;
-    var visibleSlides = Math.min(CONFIG.FEATURED_CAROUSEL_VISIBLE || 3, totalSlides);
-    var maxPos = totalSlides - visibleSlides; // Last valid position
-    var slideWidth = 100 / visibleSlides;
+    // Determine how many products fit per slide based on the container width
+    var visiblePerSlide = determineVisiblePerSlide();
 
-    // STEP 5: Build HTML
-    var html = '<div class="featured-carousel">';
+    // Create balanced groups
+    var groups = createBalancedGroups(featured, visiblePerSlide);
+
+    var totalGroups = groups.length;
+    if (totalGroups === 0) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.UI_NO_FEATURED_PRODUCTS + '</p></div>';
+        return;
+    }
+
+    // Build the carousel HTML
+    var html = '<div class="featured-carousel" id="featured-carousel-container">';
     html += '<div class="featured-carousel-track" id="featured-carousel-track">';
-    for (var i = 0; i < feat.length; i++) {
-        html += '<div class="featured-carousel-slide">' + productCardHTML(feat[i]) + '</div>';
+    for (var g = 0; g < totalGroups; g++) {
+        html += '<div class="featured-carousel-slide">';
+        for (var p = 0; p < groups[g].length; p++) {
+            html += productCardHTML(groups[g][p]);
+        }
+        html += '</div>';
     }
     html += '</div>';
 
-    // Only show controls if more products than visible
-    if (totalSlides > visibleSlides) {
+    // Only show controls if more than one group
+    if (totalGroups > 1) {
         html += '<button class="carousel-arrow carousel-prev" onclick="moveFeaturedCarousel(-1)"><i class="fas fa-chevron-left"></i></button>';
         html += '<button class="carousel-arrow carousel-next" onclick="moveFeaturedCarousel(1)"><i class="fas fa-chevron-right"></i></button>';
         html += '<div class="carousel-dots" id="featured-carousel-dots"></div>';
     }
     html += '</div>';
-    c.innerHTML = html;
+    container.innerHTML = html;
 
-    // STEP 6: Setup carousel ONLY if more products than visible
-    if (totalSlides > visibleSlides) {
+    // Setup carousel only if more than one group
+    if (totalGroups > 1) {
         var track = document.getElementById('featured-carousel-track');
 
-        track.style.width = (totalSlides * slideWidth) + '%';
-        track.querySelectorAll('.featured-carousel-slide').forEach(function(slide) {
-            slide.style.width = (100 / totalSlides) + '%';
-        });
+        // Set up the track and slides
+        track.style.width = (totalGroups * 100) + '%';
+        var slides = track.querySelectorAll('.featured-carousel-slide');
+        for (var i = 0; i < slides.length; i++) {
+            slides[i].style.width = (100 / totalGroups) + '%';
+        }
 
-        // Dots — exactly match maxPos
+        // Create dots
         var dotsContainer = document.getElementById('featured-carousel-dots');
         if (dotsContainer) {
             dotsContainer.innerHTML = '';
-            for (var j = 0; j <= maxPos; j++) {
+            for (var d = 0; d < totalGroups; d++) {
                 var dot = document.createElement('span');
-                dot.className = 'carousel-dot' + (j === 0 ? ' active' : '');
-                dot.onclick = (function(idx) { return function() { goToFeaturedSlide(idx); }; })(j);
+                dot.className = 'carousel-dot' + (d === 0 ? ' active' : '');
+                dot.onclick = (function(idx) { return function() { goToFeaturedSlide(idx); }; })(d);
                 dotsContainer.appendChild(dot);
             }
         }
 
-        // Pause on user interaction
-        var carouselContainer = c.querySelector('.featured-carousel');
+        // Store carousel data
+        featuredCarouselData = {
+            track: track,
+            totalGroups: totalGroups,
+            currentIndex: 0,
+            isPaused: false,
+            visiblePerSlide: visiblePerSlide,
+            groups: groups
+        };
+
+        // Event listeners for pause/resume
+        var carouselContainer = container.querySelector('.featured-carousel');
         if (carouselContainer) {
             carouselContainer.addEventListener('mouseenter', pauseFeaturedCarousel);
             carouselContainer.addEventListener('mouseleave', resumeFeaturedCarousel);
-            carouselContainer.addEventListener('touchstart', pauseFeaturedCarousel);
-            carouselContainer.addEventListener('touchend', function() {
-                setTimeout(resumeFeaturedCarousel, 10000);
+            carouselContainer.addEventListener('touchstart', function(e) {
+                pauseFeaturedCarousel();
+                // Store touch start position to detect swipe
+                var touch = e.touches[0];
+                var startX = touch.clientX;
+                var startY = touch.clientY;
+                var handleTouchEnd = function(ev) {
+                    var endX = ev.changedTouches[0].clientX;
+                    var endY = ev.changedTouches[0].clientY;
+                    var dx = startX - endX;
+                    var dy = startY - endY;
+                    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 30) {
+                        if (dx > 0) moveFeaturedCarousel(1);
+                        else moveFeaturedCarousel(-1);
+                    }
+                    document.removeEventListener('touchend', handleTouchEnd);
+                    setTimeout(resumeFeaturedCarousel, 10000);
+                };
+                document.addEventListener('touchend', handleTouchEnd);
             });
         }
 
-        // Start timer
+        // Start autoplay
         featuredCarouselInterval = setInterval(function() {
             moveFeaturedCarousel(1);
         }, CONFIG.FEATURED_CAROUSEL_INTERVAL || 5000);
-
-        window._featuredCarousel = {
-            track: track,
-            totalSlides: totalSlides,
-            visibleSlides: visibleSlides,
-            slideWidth: slideWidth,
-            currentPos: 0,
-            maxPos: maxPos,
-            isPaused: false
-        };
     }
+}
+
+function determineVisiblePerSlide() {
+    // Determine how many products fit per slide based on layout
+    // Check if there's an existing carousel or use defaults
+    var container = document.getElementById('featured-products');
+    if (!container) return CONFIG.FEATURED_CAROUSEL_VISIBLE || 3;
+
+    var width = container.offsetWidth;
+    if (width === 0) return CONFIG.FEATURED_CAROUSEL_VISIBLE || 3;
+
+    // Each product card in the carousel has a minimum width
+    // On mobile: ~150px, on desktop: ~200px
+    var cardWidth = width < 768 ? 150 : 200;
+    var cardGap = 14;
+    var cardTotalWidth = cardWidth + cardGap;
+
+    var maxVisible = Math.max(1, Math.floor((width + cardGap) / cardTotalWidth));
+
+    // Clamp to reasonable bounds
+    var minVisible = 1;
+    var maxAllowed = 4;
+    var visible = Math.max(minVisible, Math.min(maxAllowed, maxVisible));
+
+    return visible;
+}
+
+function createBalancedGroups(products, perGroup) {
+    var total = products.length;
+    var groups = [];
+
+    if (total <= perGroup) {
+        // All products fit in one group
+        groups.push(products.slice());
+        return groups;
+    }
+
+    // Calculate optimal group count
+    var numGroups = Math.ceil(total / perGroup);
+
+    // Distribute products evenly across groups
+    var baseSize = Math.floor(total / numGroups);
+    var remainder = total % numGroups;
+
+    var start = 0;
+    for (var i = 0; i < numGroups; i++) {
+        var size = baseSize + (i < remainder ? 1 : 0);
+        var group = products.slice(start, start + size);
+        groups.push(group);
+        start += size;
+    }
+
+    // Special case: if the last group has only 1 product and there are more than 2 groups,
+    // redistribute to make the last group more balanced
+    if (groups.length >= 2) {
+        var lastIdx = groups.length - 1;
+        var lastGroup = groups[lastIdx];
+        var prevGroup = groups[lastIdx - 1];
+
+        // If last group has only 1 product and previous group has at least 2
+        if (lastGroup.length === 1 && prevGroup.length >= 2) {
+            // Move the last product to the previous group if it would be balanced
+            // OR move one from previous to last
+            // Better: merge last two groups if total fits in perGroup
+            var combined = prevGroup.concat(lastGroup);
+            if (combined.length <= perGroup * 1.5) {
+                // Replace last two groups with a balanced split
+                var halfCombined = Math.floor(combined.length / 2);
+                var newPrev = combined.slice(0, halfCombined + (combined.length % 2));
+                var newLast = combined.slice(halfCombined + (combined.length % 2));
+                groups[lastIdx - 1] = newPrev;
+                groups[lastIdx] = newLast;
+            } else {
+                // Move last product to previous group
+                var moved = prevGroup.concat(lastGroup);
+                groups[lastIdx - 1] = moved;
+                groups.pop();
+            }
+        }
+    }
+
+    // Final check: ensure no group is empty
+    groups = groups.filter(function(g) { return g.length > 0; });
+
+    return groups;
 }
 
 function moveFeaturedCarousel(direction) {
-    var data = window._featuredCarousel;
+    var data = featuredCarouselData;
     if (!data) return;
     if (data.isPaused) return;
 
-    var newPos = data.currentPos + direction;
+    var newIndex = data.currentIndex + direction;
 
-    // Safely wrap within valid range — NEVER go beyond maxPos
-    if (newPos < 0) newPos = data.maxPos;
-    if (newPos > data.maxPos) newPos = 0;
+    // Wrap around
+    if (newIndex < 0) newIndex = data.totalGroups - 1;
+    if (newIndex >= data.totalGroups) newIndex = 0;
 
-    // Double-check boundary safety
-    if (newPos < 0 || newPos > data.maxPos) {
-        newPos = 0;
-    }
-
-    goToFeaturedSlide(newPos);
+    goToFeaturedSlide(newIndex);
 }
 
 function goToFeaturedSlide(index) {
-    var data = window._featuredCarousel;
+    var data = featuredCarouselData;
     if (!data) return;
 
-    // Validate index is within bounds — NEVER allow out-of-bounds
-    if (index < 0 || index > data.maxPos) {
+    // Validate index
+    if (index < 0 || index >= data.totalGroups) {
         index = 0;
     }
 
-    data.currentPos = index;
-    var translateX = -(index * data.slideWidth);
-    data.track.style.transform = 'translateX(' + translateX + '%)';
+    data.currentIndex = index;
+    var percent = -(index * 100);
+    data.track.style.transform = 'translateX(' + percent + '%)';
 
     var dots = document.querySelectorAll('.carousel-dot');
     for (var i = 0; i < dots.length; i++) {
@@ -776,36 +897,50 @@ function goToFeaturedSlide(index) {
 }
 
 function pauseFeaturedCarousel() {
-    var data = window._featuredCarousel;
+    var data = featuredCarouselData;
     if (!data) return;
+    if (data.isPaused) return;
+
     data.isPaused = true;
+
     if (featuredCarouselInterval) {
         clearInterval(featuredCarouselInterval);
         featuredCarouselInterval = null;
     }
+
+    // Clear any pending resume timer
+    if (featuredCarouselResumeTimer) {
+        clearTimeout(featuredCarouselResumeTimer);
+        featuredCarouselResumeTimer = null;
+    }
 }
 
 function resumeFeaturedCarousel() {
-    var data = window._featuredCarousel;
+    var data = featuredCarouselData;
     if (!data) return;
 
+    // If already playing, do nothing
+    if (!data.isPaused && featuredCarouselInterval) return;
+
+    // Clear any pending timers
     if (featuredCarouselResumeTimer) {
         clearTimeout(featuredCarouselResumeTimer);
         featuredCarouselResumeTimer = null;
     }
 
-    if (featuredCarouselInterval) {
-        return;
-    }
-
+    // Schedule resume after delay
     featuredCarouselResumeTimer = setTimeout(function() {
-        var dataCheck = window._featuredCarousel;
+        var dataCheck = featuredCarouselData;
         if (!dataCheck) return;
 
         dataCheck.isPaused = false;
         featuredCarouselResumeTimer = null;
 
-        if (dataCheck.totalSlides > dataCheck.visibleSlides) {
+        if (dataCheck.totalGroups > 1) {
+            if (featuredCarouselInterval) {
+                clearInterval(featuredCarouselInterval);
+                featuredCarouselInterval = null;
+            }
             featuredCarouselInterval = setInterval(function() {
                 moveFeaturedCarousel(1);
             }, CONFIG.FEATURED_CAROUSEL_INTERVAL || 5000);
@@ -818,6 +953,7 @@ function renderAllProducts() {
     var items = currentFilterCategory ? allProducts.filter(function(p) { return p.category_id == currentFilterCategory; }) : allProducts;
     c.innerHTML = items.length ? items.map(productCardHTML).join('') : '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.EMPTY_PRODUCTS + '</p></div>';
 }
+
 // ============ PRODUCT DETAIL ============
 function showProductDetail(id, source) {
     if (allProducts.length === 0) {
@@ -1406,13 +1542,14 @@ function bulkDeleteProducts() {
         } else {
             showToast(successCount + ' of ' + count + ' products deleted. Some failed.', 'error');
         }
-        loadDynamicData().then(function() {
+        loadDynamicData(true).then(function() {
             renderAllProductsAdmin();
         });
     }).catch(function() {
         showToast('Error deleting products. Please try again.', 'error');
     });
 }
+
 // ============ CATEGORIES LIST (ADMIN) ============
 function renderCategoriesListAdmin() {
     var ownerFilter = viewingAdminEmail || currentUserEmail;
@@ -1715,7 +1852,7 @@ async function processBulkUpload() {
 
     localStorage.removeItem('abihani_bulk_draft');
     closeAdminModal();
-    await loadDynamicData();
+    await loadDynamicData(true);
     renderAdminPanels();
 
     if (errors > 0) {
@@ -1724,6 +1861,7 @@ async function processBulkUpload() {
         showToast('✅ ' + uploaded + ' products uploaded!', 'success');
     }
 }
+
 // ============ EDIT PRODUCT ============
 function renderEditProduct(id) {
     var p = allProducts.find(function(x) { return x.id == id; }); if (!p) return;
@@ -1784,8 +1922,8 @@ async function saveEditProduct(id) {
         review_count: parseInt(document.getElementById('ep-reviews').value) || 0,
         stock_quantity: parseInt(document.getElementById('ep-stock').value) || 10,
         discount_percent: parseInt(document.getElementById('ep-discount').value) || 0,
-        vendor: document.getElementById('ep-vendor').value.trim(),
-        location: document.getElementById('ep-location').value.trim(),
+        vendor: document.getElementById('ep-vendor').value.trim() || 'Abihani Express',
+        location: document.getElementById('ep-location').value.trim() || 'Potiskum, Yobe State',
         featured: document.getElementById('ep-featured').checked
     };
 
@@ -1795,30 +1933,56 @@ async function saveEditProduct(id) {
     for (var i = 0; i < window._editSideUrls.length; i++) { if (removedIndices.indexOf(i) === -1) keptUrls.push(window._editSideUrls[i]); }
     var pickers = document.querySelectorAll('.side-picker'); for (var j = 0; j < pickers.length; j++) { if (pickers[j].files && pickers[j].files[0]) { var f = pickers[j].files[0]; var eext = f.name.split('.').pop(); var efn = 'products/' + Date.now() + '_' + j + '_extra.' + eext; var eup = await supabase.storage.from('images').upload(efn, f); if (!eup.error) keptUrls.push(supabase.storage.from('images').getPublicUrl(efn).data.publicUrl); } }
     updates.image_urls = JSON.stringify(keptUrls);
-    await supabase.from('products').update(updates).eq('id', id);
-    closeAdminModal(); showToast('Product updated!', 'success'); renderAdminPanels();
+
+    // Perform the update
+    var result = await supabase.from('products').update(updates).eq('id', id);
+
+    if (result.error) {
+        showToast('Error saving: ' + result.error.message, 'error');
+        return;
+    }
+
+    // Invalidate cache and reload fresh data
+    await loadDynamicData(true);
+
+    closeAdminModal();
+    showToast('Product updated!', 'success');
+
+    // Re-render the admin dashboard with fresh data
+    renderAdminPanels();
+
+    // If we're viewing the product detail page, refresh it
+    if (document.getElementById('product-detail-page').classList.contains('active-page')) {
+        var currentId = id;
+        setTimeout(function() {
+            showProductDetail(currentId, 'shop');
+        }, 300);
+    }
 }
 async function deleteProductConfirm(id, name) {
     if (!confirm('Delete "' + name + '" permanently?')) return;
     await supabase.from('products').delete().eq('id', id);
-    closeAdminModal(); showToast('Product deleted', 'success'); renderAdminPanels();
+    await loadDynamicData(true);
+    closeAdminModal();
+    showToast('Product deleted', 'success');
+    renderAdminPanels();
 }
 
 // ============ CATEGORY CRUD ============
 function showAddCategoryForm() { var html = '<h3>➕ Add Category</h3><label>Category Name</label><input id="ac-name" class="admin-input" placeholder="Name"><label>Emoji</label><input id="ac-emoji" class="admin-input" placeholder="e.g. 👞"><button class="btn-primary" style="width:100%" onclick="saveNewCategory()">Save</button>'; openAdminModal(html); }
-async function saveNewCategory() { var name = document.getElementById('ac-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').insert({ name: name, emoji: document.getElementById('ac-emoji').value.trim() || '📁', sort_order: allCategories.length + 1, owner_email: viewingAdminEmail || currentUserEmail }); closeAdminModal(); showToast('Category added!', 'success'); renderAdminPanels(); }
+async function saveNewCategory() { var name = document.getElementById('ac-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').insert({ name: name, emoji: document.getElementById('ac-emoji').value.trim() || '📁', sort_order: allCategories.length + 1, owner_email: viewingAdminEmail || currentUserEmail }); await loadDynamicData(true); closeAdminModal(); showToast('Category added!', 'success'); renderAdminPanels(); }
 function editCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; var html = '<h3>✏️ Edit Category</h3><label>Name</label><input id="ec-name" class="admin-input" value="' + cat.name + '"><label>Emoji</label><input id="ec-emoji" class="admin-input" value="' + (cat.emoji || '') + '"><button class="btn-primary" style="width:100%" onclick="saveEditCategory(\'' + id + '\')">Update</button>'; openAdminModal(html); }
-async function saveEditCategory(id) { var name = document.getElementById('ec-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').update({ name: name, emoji: document.getElementById('ec-emoji').value.trim() }).eq('id', id); closeAdminModal(); showToast('Updated!', 'success'); renderCategoriesListAdmin(); }
-async function deleteCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; if (!confirm('Delete "' + cat.name + '" and all its subcategories?')) return; await supabase.from('categories').delete().eq('id', id); showToast('Deleted!', 'success'); renderCategoriesListAdmin(); }
-async function moveCatUp(i) { if (i === 0) return; var a = allCategories[i], b = allCategories[i - 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); loadDynamicData(); renderCategoriesListAdmin(); }
-async function moveCatDown(i) { if (i >= allCategories.length - 1) return; var a = allCategories[i], b = allCategories[i + 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); loadDynamicData(); renderCategoriesListAdmin(); }
+async function saveEditCategory(id) { var name = document.getElementById('ec-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').update({ name: name, emoji: document.getElementById('ec-emoji').value.trim() }).eq('id', id); await loadDynamicData(true); closeAdminModal(); showToast('Updated!', 'success'); renderCategoriesListAdmin(); }
+async function deleteCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; if (!confirm('Delete "' + cat.name + '" and all its subcategories?')) return; await supabase.from('categories').delete().eq('id', id); await loadDynamicData(true); showToast('Deleted!', 'success'); renderCategoriesListAdmin(); }
+async function moveCatUp(i) { if (i === 0) return; var a = allCategories[i], b = allCategories[i - 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); await loadDynamicData(true); renderCategoriesListAdmin(); }
+async function moveCatDown(i) { if (i >= allCategories.length - 1) return; var a = allCategories[i], b = allCategories[i + 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); await loadDynamicData(true); renderCategoriesListAdmin(); }
 
 // ============ SUBCATEGORY CRUD ============
 function renderAddSubcategory(catId) { var html = '<h3>➕ Add Subcategory</h3><label>Name</label><input id="as-name" class="admin-input" placeholder="Subcategory Name"><button class="btn-primary" style="width:100%" onclick="saveNewSubcategory(\'' + catId + '\')">Save</button>'; openAdminModal(html); }
-async function saveNewSubcategory(catId) { var name = document.getElementById('as-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('subcategories').insert({ name: name, category_id: parseInt(catId), owner_email: viewingAdminEmail || currentUserEmail }); closeAdminModal(); showToast('Added!', 'success'); renderSubcategoriesAdmin(catId); }
+async function saveNewSubcategory(catId) { var name = document.getElementById('as-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('subcategories').insert({ name: name, category_id: parseInt(catId), owner_email: viewingAdminEmail || currentUserEmail }); await loadDynamicData(true); closeAdminModal(); showToast('Added!', 'success'); renderSubcategoriesAdmin(catId); }
 function editSubcategory(id) { var sub = allSubcategories.find(function(s) { return s.id == id; }); if (!sub) return; var html = '<h3>✏️ Edit Subcategory</h3><label>Name</label><input id="es-name" class="admin-input" value="' + sub.name + '"><button class="btn-primary" style="width:100%" onclick="saveEditSubcategory(\'' + id + '\')">Update</button>'; openAdminModal(html); }
-async function saveEditSubcategory(id) { var name = document.getElementById('es-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').update({ name: name }).eq('id', id); closeAdminModal(); showToast('Updated!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
-async function deleteSubcategory(id) { if (!confirm('Delete this subcategory and all its products?')) return; var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').delete().eq('id', id); showToast('Deleted!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
+async function saveEditSubcategory(id) { var name = document.getElementById('es-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').update({ name: name }).eq('id', id); await loadDynamicData(true); closeAdminModal(); showToast('Updated!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
+async function deleteSubcategory(id) { if (!confirm('Delete this subcategory and all its products?')) return; var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').delete().eq('id', id); await loadDynamicData(true); showToast('Deleted!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
 
 // ============ EMAIL CENTER ============
 function renderEmailCenter() {
