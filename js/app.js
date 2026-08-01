@@ -40,37 +40,32 @@ function showToast(msg, type) {
     setTimeout(function() { if (t.parentElement) t.remove(); }, 6000);
 }
 
+// ============ PRICE DISPLAY UTILITY ============
+function getDisplayPrice(product) {
+    // Handle numeric price
+    if (typeof product.price_numeric === 'number') {
+        return '₦' + product.price_numeric.toLocaleString();
+    }
+    // Handle text price
+    if (product.price && product.price !== '') {
+        return product.price;
+    }
+    // Fallback
+    return CONFIG.PRODUCT_DEFAULT_PRICE_TEXT;
+}
+
+function getRawPriceValue(product) {
+    // Returns numeric price for operations, null if text
+    return product.price_numeric || null;
+}
+
 // ============ INIT ============
 (function init() {
-    var rawPath = window.location.pathname.replace(/^\/+|\/+$/g, '');
-    var initialPage = rawPath || 'home';
-    var params = new URLSearchParams(window.location.search);
-    var productId = params.get('id');
-    var stateObj = { page: initialPage, isAppPage: true };
-    var url = '/' + (initialPage === 'home' ? '' : initialPage);
-    if (initialPage === 'product-detail' && productId) {
-        url += '?id=' + encodeURIComponent(productId);
-    }
-    history.replaceState(stateObj, '', url);
+    var path = window.location.pathname.replace(/\//g, '') || 'home';
+    if (path === 'index.html') path = 'home';
+    pageHistoryStack = [path];
+    history.replaceState({ page: path, isAppPage: true }, '', '/' + (path === 'home' ? '' : path));
     checkSession();
-    var initialProductId = productId;
-    var initialPageName = initialPage;
-    showPage(initialPageName, false);
-    loadDynamicData().then(function() {
-        if (initialPageName === 'product-detail' && initialProductId) {
-            setTimeout(function() {
-                var p = allProducts.find(function(x) { return x.id == initialProductId; });
-                if (p) {
-                    showProductDetail(initialProductId, 'shop');
-                } else {
-                    navigateTo('shop');
-                }
-            }, 100);
-        }
-    });
-    initPWA();
-    initHaniCharacter();
-    checkFirstVisit();
 })();
 
 (function instantStatic() {
@@ -265,19 +260,47 @@ function showAllSkeletons() {
 
 // ============ LOAD DATA ============
 async function loadDynamicData() {
-    var c = await supabase.from('categories').select('*').order('sort_order'); allCategories = c.data || [];
-    var s = await supabase.from('subcategories').select('*'); allSubcategories = s.data || [];
-    var p = await supabase.from('products').select('*').order('id'); allProducts = p.data || [];
-    var a = await supabase.from('site_settings').select('*').eq('id', 1).single();
-    if (a.data) {
-        if (a.data.announcement_text) { announcementText = a.data.announcement_text; var atEl = document.getElementById('announcement-text'); if (atEl) atEl.textContent = announcementText; }
-        if (a.data.mock_data_enabled !== undefined) mockDataActive = a.data.mock_data_enabled;
-        if (a.data.maintenance_mode !== undefined) maintenanceModeActive = a.data.maintenance_mode;
+    try {
+        var c = await supabase.from('categories').select('*').order('sort_order'); 
+        allCategories = c.data || [];
+    } catch(e) { 
+        console.error('Failed to load categories:', e); 
+        allCategories = []; 
     }
+    
+    try {
+        var s = await supabase.from('subcategories').select('*'); 
+        allSubcategories = s.data || [];
+    } catch(e) { 
+        console.error('Failed to load subcategories:', e); 
+        allSubcategories = []; 
+    }
+    
+    try {
+        var p = await supabase.from('products').select('*').order('id'); 
+        allProducts = p.data || [];
+    } catch(e) { 
+        console.error('Failed to load products:', e); 
+        allProducts = []; 
+    }
+    
+    try {
+        var a = await supabase.from('site_settings').select('*').eq('id', 1).single();
+        if (a.data) {
+            if (a.data.announcement_text) { announcementText = a.data.announcement_text; var atEl = document.getElementById('announcement-text'); if (atEl) atEl.textContent = announcementText; }
+            if (a.data.mock_data_enabled !== undefined) mockDataActive = a.data.mock_data_enabled;
+            if (a.data.maintenance_mode !== undefined) maintenanceModeActive = a.data.maintenance_mode;
+        }
+    } catch(e) { 
+        console.error('Failed to load site settings:', e); 
+    }
+    
     if (mockDataActive) mergeMockData();
-    updateCategoriesHome(); updateShopCategories(); updateFeaturedProducts();
-    var ag = document.getElementById('all-products-grid'); if (ag) renderAllProducts();
-    return allProducts;
+    updateCategoriesHome(); 
+    updateShopCategories(); 
+    updateFeaturedProducts();
+    var ag = document.getElementById('all-products-grid'); 
+    if (ag) renderAllProducts();
 }
 
 // ============ MOCK DATA (KEPT FOR PUBLIC DISPLAY) ============
@@ -368,26 +391,12 @@ testimonialInterval = setInterval(rotateTestimonial, 5000);
 // ============ NAVIGATION (Clean URLs - No Hash) ============
 var validAppPages = ['home','shop','search','about','contact','profile','admin-login','admin-dashboard','product-detail','terms','privacy'];
 
-// ============ NAVIGATION (Clean URLs - No Hash) ============
-var validAppPages = ['home','shop','search','about','contact','profile','admin-login','admin-dashboard','product-detail','terms','privacy'];
-
 function navigateTo(pageName, addToHistory) {
     if (addToHistory === undefined) addToHistory = true;
     if (pageName === 'profile' && isAdminLoggedIn) { pageName = 'admin-dashboard'; }
     if (pageName === 'admin-dashboard' && !isAdminLoggedIn) { pageName = 'profile'; }
-    
-    // Handle Admin Dashboard - DO NOT inject spinner HTML here. Let renderAdminPanels handle it.
-    if (pageName === 'admin-dashboard') {
-        showPage('admin-dashboard');
-        // Use a tiny delay to ensure DOM is ready, then render
-        setTimeout(function() { renderAdminPanels(); }, 50);
-        if (addToHistory && pageName !== pageHistoryStack[pageHistoryStack.length - 1]) pushToHistory(pageName);
-        resetInactivityTimer();
-        return;
-    }
-    
-    if (pageName === 'product-detail') return; // Prevent direct navigation without ID
-    
+    if (pageName === 'admin-dashboard') { showPage('admin-dashboard'); renderAdminPanels(); pushToHistory('admin-dashboard'); resetInactivityTimer(); return; }
+    if (pageName === 'product-detail') return;
     showPage(pageName);
     if (addToHistory && pageName !== pageHistoryStack[pageHistoryStack.length - 1]) pushToHistory(pageName);
     if (isAdminLoggedIn) resetInactivityTimer();
@@ -408,91 +417,36 @@ function goBackSmart() {
 }
 function showPage(pageName) {
     window.scrollTo(0, 0);
-
-    // Reset meta tags to defaults when leaving a product page
-    if (pageName !== 'product-detail') {
-        var defaultTitle = 'Abihani Express · Your perfect home for leather works';
-        var defaultDesc = 'Premium handcrafted leather goods from Yobe State. Quality and durability is our promise.';
-        var defaultImg = 'https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/social-share.jpg';
-        document.getElementById('og-title').content = defaultTitle;
-        document.getElementById('og-description').content = defaultDesc;
-        document.getElementById('og-image').content = defaultImg;
-        document.getElementById('tw-title').content = defaultTitle;
-        document.getElementById('tw-description').content = defaultDesc;
-        document.getElementById('tw-image').content = defaultImg;
-    }
-
     if (pageName === 'profile' && isAdminLoggedIn) { navigateTo('admin-dashboard', false); return; }
     if (pageName === 'admin-dashboard' && !isAdminLoggedIn) { navigateTo('profile', false); return; }
     document.querySelectorAll('.page-section').forEach(function(p) { p.classList.remove('active-page'); });
     var map = { 'home': 'home-page', 'shop': 'shop-page', 'product-detail': 'product-detail-page', 'search': 'search-page', 'about': 'about-page', 'contact': 'contact-page', 'terms': 'terms-page', 'privacy': 'privacy-page', 'profile': 'profile-page', 'admin-login': 'admin-login-page', 'admin-dashboard': 'admin-dashboard-page' };
+    if (pageName === 'admin-dashboard') {
+        var ctn = document.getElementById('admin-dashboard-content');
+        if (ctn) ctn.innerHTML = '<div style="text-align:center;padding:60px 20px"><div class="spinner" style="width:40px;height:40px;border-width:3px;border-color:rgba(184,124,79,0.2);border-top-color:#b87c4f;margin:0 auto 16px"></div><p style="color:var(--text-muted);font-size:14px">Loading dashboard...</p></div>';
+    }
     var target = document.getElementById(map[pageName]); if (target) target.classList.add('active-page');
     if (pageName === 'shop') renderAllProducts();
     if (pageName === 'search') { var sr = document.getElementById('search-results'); if (sr) sr.innerHTML = ''; var si = document.getElementById('search-input'); if (si) si.value = ''; }
-    updateNav(pageName); updatePageHistory(pageName);
+    updateNav(); updatePageHistory(pageName);
 }
-function updatePageHistory(page) { 
-    if (pageHistoryStack.length === 0 || pageHistoryStack[pageHistoryStack.length - 1] !== page) {
-        pageHistoryStack.push(page);
-    }
-}
-function updateNav(page) {
-    if (!page) {
-        var activePage = document.querySelector('.page-section.active-page');
-        if (activePage) {
-            var map = {
-                'home-page': 'home', 'shop-page': 'shop', 'search-page': 'search',
-                'about-page': 'about', 'contact-page': 'contact', 'terms-page': 'terms',
-                'privacy-page': 'privacy', 'profile-page': 'profile',
-                'admin-login-page': 'admin-login', 'admin-dashboard-page': 'admin-dashboard',
-                'product-detail-page': 'product-detail'
-            };
-            page = map[activePage.id] || 'home';
-        } else {
-            page = 'home';
-        }
-    }
-    document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+function updatePageHistory(page) { if (pageHistoryStack[pageHistoryStack.length - 1] !== page) pageHistoryStack.push(page); }
+function updateNav() {
+    var path = window.location.pathname.replace(/\//g, '') || 'home';
     var nm = { home: 'nav-home', shop: 'nav-shop', search: 'nav-search', profile: 'nav-profile', about: 'nav-home', contact: 'nav-home', terms: 'nav-home', privacy: 'nav-home', 'admin-login': 'nav-profile', 'admin-dashboard': 'nav-profile', 'product-detail': 'nav-shop' };
-    var tid = nm[page] || 'nav-home'; 
-    var an = document.getElementById(tid); 
-    if (an) an.classList.add('active');
+    document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+    var tid = nm[path] || 'nav-home'; var an = document.getElementById(tid); if (an) an.classList.add('active');
     document.querySelectorAll('.desktop-nav a').forEach(function(a) { a.classList.remove('active'); });
-    var da = document.querySelector('.desktop-nav a[data-page="' + page + '"]'); 
-    if (da) da.classList.add('active');
+    var da = document.querySelector('.desktop-nav a[data-page="' + path + '"]'); if (da) da.classList.add('active');
 }
 window.addEventListener('popstate', function(e) {
     var state = e.state;
-    if (!state || !state.isAppPage) { 
-        navigateTo('home', false); 
-        return; 
-    }
+    if (!state || !state.isAppPage) { navigateTo('home', false); return; }
     var path = state.page || 'home';
-    if (validAppPages.indexOf(path) === -1) { 
-        navigateTo('home', false); 
-        return; 
-    }
-    if (pageHistoryStack.length > 0 && pageHistoryStack[pageHistoryStack.length - 1] !== path) {
-        pageHistoryStack.push(path);
-    } else if (pageHistoryStack.length === 0) {
-        pageHistoryStack.push(path);
-    }
-    if (path === 'product-detail') {
-        var params = new URLSearchParams(window.location.search);
-        var id = params.get('id');
-        // If we have a valid ID and the product exists, show it.
-        if (id) {
-            var p = allProducts.find(function(x) { return x.id == id; });
-            if (p) {
-                showProductDetail(id, 'shop');
-                return;
-            }
-        }
-        // Otherwise, navigate to the appropriate fallback (shop or home).
-        navigateTo('shop', false);
-    } else {
-        showPage(path);
-    }
+    pageHistoryStack = pageHistoryStack.filter(function(p) { return p !== path; });
+    pageHistoryStack.push(path);
+    if (validAppPages.indexOf(path) === -1) { navigateTo('home', false); return; }
+    if (path === 'product-detail') { navigateTo('shop', false); } else showPage(path);
 });
 var initPath = window.location.pathname.replace(/\//g, '') || 'home';
 (function() { pageHistoryStack = [initPath]; showPage(initPath); })();
@@ -529,15 +483,112 @@ function productCardHTML(p) {
     for (var i = 0; i < empty; i++) stars += '<i class="far fa-star"></i>';
     var rc = (p.review_count && p.review_count > 0) ? p.review_count : Math.floor(Math.random() * 235) + 12;
     var imgHtml = p.image_url ? '<img src="' + p.image_url + '" alt="' + p.name + '" loading="lazy">' : '<div style="font-size:40px;display:flex;align-items:center;justify-content:center;height:100%">' + (p.image_icon || CONFIG.PRODUCT_DEFAULT_ICON) + '</div>';
-    var priceHtml = '<div class="product-price">₦' + (p.price ? p.price.toLocaleString() : '0') + '</div>';
-    if (p.discount_percent > 0) { var sp = Math.round(p.price * (1 - p.discount_percent / 100)); priceHtml = '<div class="product-price"><span style="text-decoration:line-through;color:var(--text-muted);font-size:14px">₦' + p.price.toLocaleString() + '</span> ₦' + sp.toLocaleString() + ' <span style="background:#e74c3c;color:#fff;padding:2px 6px;border-radius:4px;font-size:10px">-' + p.discount_percent + '%</span></div>'; }
+    
+    // Use the utility function for price display
+    var displayPrice = getDisplayPrice(p);
+    var priceHtml = '<div class="product-price">' + displayPrice + '</div>';
+    
+    // Show discount only if numeric price exists and discount > 0
+    if (typeof p.price_numeric === 'number' && p.discount_percent > 0) {
+        var sp = Math.round(p.price_numeric * (1 - p.discount_percent / 100));
+        var originalPrice = '₦' + p.price_numeric.toLocaleString();
+        var salePrice = '₦' + sp.toLocaleString();
+        priceHtml = '<div class="product-price"><span style="text-decoration:line-through;color:var(--text-muted);font-size:14px">' + originalPrice + '</span> ' + salePrice + ' <span style="background:#e74c3c;color:#fff;padding:2px 6px;border-radius:4px;font-size:10px">-' + p.discount_percent + '%</span></div>';
+    }
+    
     return '<div class="product-card" onclick="showProductDetail(\'' + p.id + '\', \'shop\')"><div class="product-image">' + imgHtml + '</div><div class="product-info"><h4>' + (p.name || '') + '</h4>' + priceHtml + '<div class="product-rating">' + stars + ' (' + rc + ')</div><div class="product-vendor"><i class="fas fa-store"></i> ' + (p.vendor || CONFIG.PRODUCT_DEFAULT_VENDOR) + '</div><button class="btn-wa-small" onclick="event.stopPropagation();buyNow(\'' + p.id + '\')"><i class="fab fa-whatsapp"></i> ' + CONFIG.UI_BUY_NOW + '</button></div></div>';
 }
+var featuredCarouselInterval = null;
+
 function updateFeaturedProducts() {
-    var c = document.getElementById('featured-products'); if (!c) return;
+    var c = document.getElementById('featured-products');
+    if (!c) return;
+    
     var feat = allProducts.filter(function(p) { return p.featured; });
-    feat = feat.sort(function() { return 0.5 - Math.random(); }).slice(0, CONFIG.FEATURED_PRODUCTS_DISPLAY_COUNT || 8);
-    c.innerHTML = feat.length ? feat.map(productCardHTML).join('') : '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.UI_NO_FEATURED_PRODUCTS + '</p></div>';
+    feat = feat.sort(function() { return 0.5 - Math.random(); });
+    
+    if (feat.length === 0) {
+        c.innerHTML = '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.UI_NO_FEATURED_PRODUCTS + '</p></div>';
+        return;
+    }
+    
+    var html = '<div class="featured-carousel">';
+    html += '<div class="featured-carousel-track" id="featured-carousel-track">';
+    for (var i = 0; i < feat.length; i++) {
+        html += '<div class="featured-carousel-slide">' + productCardHTML(feat[i]) + '</div>';
+    }
+    html += '</div>';
+    
+    // Only show controls if more than 3 products
+    if (feat.length > 3) {
+        html += '<button class="carousel-arrow carousel-prev" onclick="moveFeaturedCarousel(-1)"><i class="fas fa-chevron-left"></i></button>';
+        html += '<button class="carousel-arrow carousel-next" onclick="moveFeaturedCarousel(1)"><i class="fas fa-chevron-right"></i></button>';
+        html += '<div class="carousel-dots" id="featured-carousel-dots"></div>';
+    }
+    html += '</div>';
+    c.innerHTML = html;
+    
+    // Setup carousel if more than 3
+    if (feat.length > 3) {
+        var track = document.getElementById('featured-carousel-track');
+        var totalSlides = feat.length;
+        var visibleSlides = CONFIG.FEATURED_CAROUSEL_VISIBLE || 3;
+        var slideWidth = 100 / visibleSlides;
+        var maxPos = Math.max(0, totalSlides - visibleSlides);
+        
+        track.style.width = (totalSlides * slideWidth) + '%';
+        track.querySelectorAll('.featured-carousel-slide').forEach(function(slide) {
+            slide.style.width = (100 / totalSlides) + '%';
+        });
+        
+        var dotsContainer = document.getElementById('featured-carousel-dots');
+        if (dotsContainer) {
+            dotsContainer.innerHTML = '';
+            for (var j = 0; j <= maxPos; j++) {
+                var dot = document.createElement('span');
+                dot.className = 'carousel-dot' + (j === 0 ? ' active' : '');
+                dot.onclick = (function(idx) { return function() { goToFeaturedSlide(idx); }; })(j);
+                dotsContainer.appendChild(dot);
+            }
+        }
+        
+        clearInterval(featuredCarouselInterval);
+        featuredCarouselInterval = setInterval(function() {
+            moveFeaturedCarousel(1);
+        }, CONFIG.FEATURED_CAROUSEL_INTERVAL || 5000);
+        
+        window._featuredCarousel = {
+            track: track,
+            totalSlides: totalSlides,
+            visibleSlides: visibleSlides,
+            slideWidth: slideWidth,
+            currentPos: 0,
+            maxPos: maxPos
+        };
+    }
+}
+
+function moveFeaturedCarousel(direction) {
+    var data = window._featuredCarousel;
+    if (!data) return;
+    
+    var newPos = data.currentPos + direction;
+    if (newPos < 0) newPos = data.maxPos;
+    if (newPos > data.maxPos) newPos = 0;
+    goToFeaturedSlide(newPos);
+}
+
+function goToFeaturedSlide(index) {
+    var data = window._featuredCarousel;
+    if (!data) return;
+    
+    data.currentPos = index;
+    data.track.style.transform = 'translateX(-' + (index * data.slideWidth) + '%)';
+    
+    var dots = document.querySelectorAll('.carousel-dot');
+    for (var i = 0; i < dots.length; i++) {
+        dots[i].classList.toggle('active', i === index);
+    }
 }
 function renderAllProducts() {
     var c = document.getElementById('all-products-grid'); if (!c) return;
@@ -547,32 +598,22 @@ function renderAllProducts() {
 
 // ============ PRODUCT DETAIL ============
 function showProductDetail(id, source) {
-    if (allProducts.length === 0) {
-        loadDynamicData().then(function() {
-            showProductDetail(id, source);
-        });
-        return;
-    }
     if (source) detailSource = source;
     var p = allProducts.find(function(x) { return x.id == id; }); if (!p) return;
     currentDetailProduct = p;
-    var imgForMeta = p.image_url || 'https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/social-share.jpg';
-    var descForMeta = p.description || 'Premium handcrafted leather goods.';
-    var titleForMeta = p.name + ' · Abihani Express';
-    document.getElementById('og-title').content = titleForMeta;
-    document.getElementById('og-description').content = descForMeta;
-    document.getElementById('og-image').content = imgForMeta;
-    document.getElementById('tw-title').content = titleForMeta;
-    document.getElementById('tw-description').content = descForMeta;
-    document.getElementById('tw-image').content = imgForMeta;
     var imgs = []; try { imgs = JSON.parse(p.image_urls || '[]'); } catch(e) {} if (p.image_url) imgs.unshift(p.image_url);
-    // ... remaining code ...
     currentDetailImages = imgs; currentDetailIndex = 0;
     var mainImg = imgs.length ? imgs[0] : '';
     var arrowNav = '';
     if (imgs.length > 1) { arrowNav = '<div class="detail-arrow-nav"><button class="detail-arrow detail-prev" onclick="navigateDetailImage(-1)"><i class="fas fa-chevron-left"></i></button><button class="detail-arrow detail-next" onclick="navigateDetailImage(1)"><i class="fas fa-chevron-right"></i></button></div><div class="detail-dots">' + imgs.map(function(_, idx) { return '<span class="detail-dot' + (idx === 0 ? ' active' : '') + '" onclick="jumpToDetailImage(' + idx + ')"></span>'; }).join('') + '</div>'; }
-    var priceHtml = '₦' + p.price.toLocaleString();
-    if (p.discount_percent > 0) { var sp = Math.round(p.price * (1 - p.discount_percent / 100)); priceHtml = '<span style="text-decoration:line-through;color:var(--text-muted)">₦' + p.price.toLocaleString() + '</span> <span style="color:var(--accent)">₦' + sp.toLocaleString() + '</span> <span style="background:#e74c3c;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px">-' + p.discount_percent + '%</span>'; }
+    var displayPrice = getDisplayPrice(p);
+var priceHtml = displayPrice;
+if (typeof p.price_numeric === 'number' && p.discount_percent > 0) {
+    var sp = Math.round(p.price_numeric * (1 - p.discount_percent / 100));
+    var originalPrice = '₦' + p.price_numeric.toLocaleString();
+    var salePrice = '₦' + sp.toLocaleString();
+    priceHtml = '<span style="text-decoration:line-through;color:var(--text-muted)">' + originalPrice + '</span> <span style="color:var(--accent)">' + salePrice + '</span> <span style="background:#e74c3c;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px">-' + p.discount_percent + '%</span>';
+}
     document.getElementById('detail-back-label').textContent = detailSource === 'search' ? 'Back to Search' : 'Back to Shop';
     document.getElementById('product-share-container').innerHTML = '<button class="btn-secondary btn-sm" onclick="shareProduct(\'' + p.id + '\')"><i class="fas fa-share-alt"></i> Share</button>';
     document.getElementById('product-detail-container').innerHTML = '<div class="product-detail-container"><div class="product-detail-image"><div class="detail-image-wrapper"><img id="detail-main-img" src="' + (mainImg || 'https://placehold.co/400x400/e6d5c0/8b5a2b?text=' + encodeURIComponent(p.name || '')) + '" alt="' + p.name + '">' + arrowNav + '</div></div><div class="product-detail-info"><h1>' + p.name + '</h1><div class="product-detail-price">' + priceHtml + '</div><p>⭐ ' + (p.rating || CONFIG.PRODUCT_DEFAULT_RATING) + ' (' + (p.review_count || 0) + ' reviews)</p><p><i class="fas fa-map-marker-alt"></i> ' + (p.location || CONFIG.PRODUCT_DEFAULT_LOCATION) + '</p><p><i class="fas fa-store"></i> ' + (p.vendor || CONFIG.PRODUCT_DEFAULT_VENDOR) + '</p><p>' + (p.description || '') + '</p><button class="btn-primary" onclick="buyNow(\'' + p.id + '\')"><i class="fab fa-whatsapp"></i> Buy Now via WhatsApp</button><button class="btn-secondary" style="margin-top:12px" onclick="navigateTo(\'' + detailSource + '\')">← Back</button></div></div>';
@@ -745,17 +786,11 @@ function updateCategoriesHome() { var c = document.getElementById('categories-ho
 function updateShopCategories() { var c = document.getElementById('shop-categories-filter'); if (!c) return; c.innerHTML = '<div class="category-pill active" onclick="filterAllProducts()">All</div>' + allCategories.map(function(cat) { return '<div class="category-pill" onclick="filterByCategory(\'' + cat.id + '\')">' + (cat.emoji || '') + ' ' + cat.name + '</div>'; }).join(''); }
 
 function buyNow(id) {
-    var p = allProducts.find(function(x) { return x.id == id; }); 
-    if (!p) return;
+    var p = allProducts.find(function(x) { return x.id == id; }); if (!p) return;
     if (p.is_mock) { showToast('This is a mock product for display', 'info'); return; }
-    
     var whatsapp = p.owner_whatsapp || CONFIG.WHATSAPP_NUMBER;
-    var productLink = window.location.origin + '/product-detail?id=' + encodeURIComponent(id);
-    
-    // Using double newlines at the end forces cursor to the bottom in many mobile apps
-    var message = 'Hello! I want: ' + p.name + ' (₦' + p.price + ')\n\nProduct:\n' + productLink + '\n\n';
-    
-    window.open('https://wa.me/' + whatsapp.replace(/[^0-9]/g, '') + '?text=' + encodeURIComponent(message), '_blank');
+    var displayPrice = getDisplayPrice(p);
+    window.open('https://wa.me/' + whatsapp.replace(/[^0-9]/g, '') + '?text=Hello! I want: ' + encodeURIComponent(p.name) + ' (' + displayPrice + ')', '_blank');
 }
 function showExpiryWarning(expiryDate) { showToast('Your partnership expires on ' + expiryDate.toLocaleDateString() + '. Contact CEO to renew.', 'info'); }
 async function checkUnreadMessages(email) {
@@ -805,12 +840,6 @@ window.closePWAInstall = closePWAInstall; window.installPWA = installPWA;
 window.toggleHaniVisibility = toggleHaniVisibility;
 // ============ ADMIN DASHBOARD ============
 async function renderAdminPanels() {
-    // Safety check: if session or email is missing, redirect back to login
-    if (!isAdminLoggedIn || !currentUserEmail) {
-        navigateTo('profile', false);
-        return;
-    }
-    
     await loadDynamicData();
     var isCEO = currentUserIsCEO;
     var ownerFilter = viewingAdminEmail || currentUserEmail;
@@ -865,7 +894,11 @@ async function renderAdminPanels() {
         }
     }
 
-    html += '<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap"><button class="btn-primary" onclick="showAddProductForm()"><i class="fas fa-plus"></i> ' + CONFIG.UI_ADD_PRODUCT + '</button><button class="btn-secondary" onclick="showAddCategoryForm()"><i class="fas fa-plus"></i> ' + CONFIG.UI_ADD_CATEGORY + '</button></div>';
+    html += '<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">';
+html += '<button class="btn-primary" onclick="showAddProductForm()"><i class="fas fa-plus"></i> ' + CONFIG.UI_ADD_PRODUCT + '</button>';
+html += '<button class="btn-secondary" onclick="showBulkUploadForm()"><i class="fas fa-images"></i> Bulk Upload</button>';
+html += '<button class="btn-secondary" onclick="showAddCategoryForm()"><i class="fas fa-plus"></i> ' + CONFIG.UI_ADD_CATEGORY + '</button>';
+html += '</div>';
     html += '<div class="admin-card" style="cursor:pointer" onclick="renderAllProductsAdmin()"><h4>📦 All Products (' + filteredProducts.length + ')</h4><p style="font-size:11px;color:var(--text-muted)">Tap to view, edit or delete</p></div>';
     html += '<div class="admin-card" style="cursor:pointer" onclick="renderCategoriesListAdmin()"><h4>📁 Categories (' + filteredCategories.length + ')</h4><p style="font-size:11px;color:var(--text-muted)">Tap to browse categories</p></div>';
 
@@ -1035,16 +1068,103 @@ async function saveAnnouncement() {
 }
 
 // ============ ALL PRODUCTS (ADMIN) ============
+
 function renderAllProductsAdmin() {
     var ownerFilter = viewingAdminEmail || currentUserEmail;
     var prods = allProducts.filter(function(p) { return currentUserIsCEO && !viewingAdminEmail ? !p.is_mock : (p.owner_email === ownerFilter && !p.is_mock); });
     var container = document.getElementById('admin-dashboard-content');
-    var html = '<div class="flex-between" style="margin-bottom:16px"><button class="btn-outline btn-sm" onclick="renderAdminPanels()">← Back</button><h3>📦 All Products (' + prods.length + ')</h3><span></span></div>';
-    if (prods.length === 0) { html += '<p style="text-align:center;color:var(--text-muted);padding:30px">No products yet</p>'; }
-    else { for (var i = 0; i < prods.length; i++) { var p = prods[i]; html += '<div class="item-row" onclick="renderEditProduct(\'' + p.id + '\')"><span>' + (p.image_url ? '<img src="' + p.image_url + '" style="width:40px;height:40px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle">' : '<span style="font-size:24px;margin-right:8px;vertical-align:middle">' + (p.image_icon || '📦') + '</span>') + '<strong>' + p.name + '</strong><br><small style="color:var(--accent)">₦' + (p.price || 0).toLocaleString() + '</small> ' + (p.featured ? '⭐' : '') + '</span><span style="font-size:20px;color:var(--accent)">›</span></div>'; } }
+    
+    var html = '<div class="flex-between" style="margin-bottom:16px">';
+    html += '<button class="btn-outline btn-sm" onclick="renderAdminPanels()">← Back</button>';
+    html += '<h3>📦 All Products (' + prods.length + ')</h3>';
+    html += '<span></span></div>';
+    
+    // Bulk actions toolbar
+    html += '<div class="bulk-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:var(--bg-secondary);border-radius:var(--radius-sm);">';
+    html += '<label style="font-size:13px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="select-all-products" onchange="toggleAllProducts()"> Select All</label>';
+    html += '<button class="btn-danger btn-sm" id="delete-selected-btn" onclick="bulkDeleteProducts()" disabled>🗑️ Delete Selected</button>';
+    html += '<span id="selected-count" style="font-size:12px;color:var(--text-muted);margin-left:auto;">0 selected</span>';
+    html += '</div>';
+    
+    if (prods.length === 0) {
+        html += '<p style="text-align:center;color:var(--text-muted);padding:30px">No products yet</p>';
+    } else {
+        for (var i = 0; i < prods.length; i++) {
+            var p = prods[i];
+            var displayPrice = getDisplayPrice(p);
+            
+            html += '<div class="item-row" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);">';
+            html += '<input type="checkbox" class="product-select-checkbox" data-id="' + p.id + '" onchange="updateBulkSelectUI()">';
+            html += '<div style="flex:1;cursor:pointer" onclick="renderEditProduct(\'' + p.id + '\')">';
+            html += (p.image_url ? '<img src="' + p.image_url + '" style="width:40px;height:40px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle">' : '<span style="font-size:24px;margin-right:8px;vertical-align:middle">' + (p.image_icon || '📦') + '</span>');
+            html += '<strong>' + p.name + '</strong>';
+            html += '<br><small style="color:var(--accent)">' + displayPrice + '</small>';
+            if (p.featured) html += ' ⭐';
+            html += '</div>';
+            html += '<span style="font-size:20px;color:var(--accent);">›</span>';
+            html += '</div>';
+        }
+    }
     container.innerHTML = html;
 }
 
+// Bulk delete functions
+var selectedProductIds = [];
+
+function toggleAllProducts() {
+    var checked = document.getElementById('select-all-products').checked;
+    var checkboxes = document.querySelectorAll('.product-select-checkbox');
+    for (var i = 0; i < checkboxes.length; i++) {
+        checkboxes[i].checked = checked;
+    }
+    updateBulkSelectUI();
+}
+
+function updateBulkSelectUI() {
+    var checkboxes = document.querySelectorAll('.product-select-checkbox');
+    var checked = [];
+    for (var i = 0; i < checkboxes.length; i++) {
+        if (checkboxes[i].checked) checked.push(checkboxes[i].getAttribute('data-id'));
+    }
+    selectedProductIds = checked;
+    var count = checked.length;
+    var countEl = document.getElementById('selected-count');
+    if (countEl) countEl.textContent = count + ' selected';
+    var btn = document.getElementById('delete-selected-btn');
+    if (btn) btn.disabled = count === 0;
+    var selectAll = document.getElementById('select-all-products');
+    if (selectAll) {
+        var total = checkboxes.length;
+        if (total > 0 && count === total) selectAll.checked = true;
+        else if (count === 0) selectAll.checked = false;
+        else selectAll.indeterminate = true;
+    }
+}
+
+function bulkDeleteProducts() {
+    if (selectedProductIds.length === 0) return;
+    if (!confirm('Delete ' + selectedProductIds.length + ' selected products permanently?')) return;
+    var count = selectedProductIds.length;
+    
+    var promises = [];
+    for (var i = 0; i < selectedProductIds.length; i++) {
+        promises.push(supabase.from('products').delete().eq('id', selectedProductIds[i]));
+    }
+    
+    Promise.all(promises).then(function(results) {
+        var successCount = results.filter(function(r) { return !r.error; }).length;
+        if (successCount === count) {
+            showToast(count + ' products deleted!', 'success');
+        } else {
+            showToast(successCount + ' of ' + count + ' products deleted. Some failed.', 'error');
+        }
+        loadDynamicData().then(function() {
+            renderAllProductsAdmin();
+        });
+    }).catch(function() {
+        showToast('Error deleting products. Please try again.', 'error');
+    });
+}
 // ============ CATEGORIES LIST (ADMIN) ============
 function renderCategoriesListAdmin() {
     var ownerFilter = viewingAdminEmail || currentUserEmail;
@@ -1076,7 +1196,9 @@ function renderSubProductsAdmin(subId) {
     var container = document.getElementById('admin-dashboard-content');
     var html = '<div class="flex-between" style="margin-bottom:16px"><button class="btn-outline btn-sm" onclick="renderSubcategoriesAdmin(\'' + sub.category_id + '\')">← Back</button><h3>📂 ' + sub.name + '</h3><span></span></div>';
     if (prods.length === 0) { html += '<p style="text-align:center;color:var(--text-muted);padding:20px">No products here</p>'; }
-    else { for (var i = 0; i < prods.length; i++) { var p = prods[i]; html += '<div class="item-row" onclick="renderEditProduct(\'' + p.id + '\')"><span>' + (p.image_url ? '<img src="' + p.image_url + '" style="width:36px;height:36px;object-fit:cover;border-radius:4px;margin-right:8px;vertical-align:middle">' : '<span style="font-size:22px;margin-right:8px;vertical-align:middle">' + (p.image_icon || '📦') + '</span>') + '<strong>' + p.name + '</strong><br><small style="color:var(--accent)">₦' + (p.price || 0).toLocaleString() + '</small></span><span style="font-size:20px;color:var(--accent)">›</span></div>'; } }
+    else { for (var i = 0; i < prods.length; i++) { var p = prods[i]; var displayPrice = getDisplayPrice(p);
+html += '<div class="item-row" onclick="renderEditProduct(\'' + p.id + '\')"><span>' + (p.image_url ? '<img src="' + p.image_url + '" style="width:36px;height:36px;object-fit:cover;border-radius:4px;margin-right:8px;vertical-align:middle">' : '<span style="font-size:22px;margin-right:8px;vertical-align:middle">' + (p.image_icon || '📦') + '</span>') + '<strong>' + p.name + '</strong><br><small style="color:var(--accent)">' + displayPrice + '</small></span><span style="font-size:20px;color:var(--accent)">›</span></div>';
+}
     container.innerHTML = html;
 }
 
@@ -1085,7 +1207,8 @@ function showAddProductForm() {
     var catOpts = allCategories.filter(function(c){return !c.is_mock;}).map(function(c){return '<option value="'+c.id+'">'+(c.emoji||'')+' '+c.name+'</option>';}).join('');
     var html = '<h3>➕ Add Product</h3>';
     html += '<label>Product Name *</label><input id="ap-name" class="admin-input" placeholder="Product Name">';
-    html += '<label>Price (₦) *</label><input id="ap-price" class="admin-input" type="number" placeholder="Price">';
+    html += '<label>Price <span style="color:var(--text-muted);font-weight:400;">(Optional — text or number)</span></label>';
+    html += '<input id="ap-price" class="admin-input" type="text" placeholder="e.g. 15000 or Ask on WhatsApp or Contact for Price">';
     html += '<label>Category</label><select id="ap-category" class="admin-input" onchange="updateAddSubcats()"><option value="">None</option>' + catOpts + '</select>';
     html += '<label>Subcategory</label><select id="ap-subcategory" class="admin-input"><option value="">None</option></select>';
     html += '<label>Description</label><textarea id="ap-desc" class="admin-input" rows="2"></textarea>';
@@ -1105,17 +1228,259 @@ function showAddProductForm() {
 }
 function addAddSidePicker() { var c = document.getElementById('ap-side-container'); var d = document.createElement('div'); d.style.marginTop = '4px'; d.innerHTML = '<input type="file" accept="image/*" class="ap-side-picker" style="font-size:12px">'; c.appendChild(d); }
 async function saveNewProduct() {
-    var name = document.getElementById('ap-name').value.trim(); var price = parseInt(document.getElementById('ap-price').value);
-    if (!name || !price) { showToast('Name and price required', 'error'); return; }
+    var name = document.getElementById('ap-name').value.trim();
+var priceInput = document.getElementById('ap-price').value.trim();
+if (!name) { showToast('Name is required', 'error'); return; }
+
+// Process price: detect if it's a number or text
+var price = priceInput || CONFIG.PRODUCT_DEFAULT_PRICE_TEXT;
+var priceNumeric = null;
+// Try to parse as number if it looks like a number
+var cleanPrice = priceInput.replace(/,/g, '').trim();
+if (/^[\d]+$/.test(cleanPrice)) {
+    priceNumeric = parseInt(cleanPrice);
+    price = '₦' + priceNumeric.toLocaleString();
+}
     var ownerEmail = viewingAdminEmail || currentUserEmail;
     var mainUrl = ''; var mf = document.getElementById('ap-main-image').files[0];
     if (mf) { var ext = mf.name.split('.').pop(); var fn = 'products/' + Date.now() + '_main.' + ext; var up = await supabase.storage.from('images').upload(fn, mf); if (!up.error) mainUrl = supabase.storage.from('images').getPublicUrl(fn).data.publicUrl; }
     var extraUrls = []; var pickers = document.querySelectorAll('.ap-side-picker');
     for (var i = 0; i < pickers.length; i++) { if (pickers[i].files && pickers[i].files[0]) { var f = pickers[i].files[0]; var eext = f.name.split('.').pop(); var efn = 'products/' + Date.now() + '_' + i + '_extra.' + eext; var eup = await supabase.storage.from('images').upload(efn, f); if (!eup.error) extraUrls.push(supabase.storage.from('images').getPublicUrl(efn).data.publicUrl); } }
-    await supabase.from('products').insert({ name: name, price: price, category_id: document.getElementById('ap-category').value || null, subcategory_id: document.getElementById('ap-subcategory').value || null, description: document.getElementById('ap-desc').value.trim(), rating: parseFloat(document.getElementById('ap-rating').value) || 4.5, review_count: parseInt(document.getElementById('ap-reviews').value) || Math.floor(Math.random() * 235) + 12, stock_quantity: parseInt(document.getElementById('ap-stock').value) || 10, discount_percent: parseInt(document.getElementById('ap-discount').value) || 0, vendor: document.getElementById('ap-vendor').value.trim() || 'Abihani Express', location: document.getElementById('ap-location').value.trim() || 'Potiskum, Yobe State', featured: document.getElementById('ap-featured').checked, image_url: mainUrl, image_urls: JSON.stringify(extraUrls), image_icon: '📦', owner_email: ownerEmail, owner_whatsapp: '' });
+    await supabase.from('products').insert({
+    name: name,
+    price: price,
+    price_numeric: priceNumeric,
+    category_id: document.getElementById('ap-category').value || null,
+    subcategory_id: document.getElementById('ap-subcategory').value || null,
+    description: document.getElementById('ap-desc').value.trim(),
+    rating: parseFloat(document.getElementById('ap-rating').value) || 4.5,
+    review_count: parseInt(document.getElementById('ap-reviews').value) || Math.floor(Math.random() * 235) + 12,
+    stock_quantity: parseInt(document.getElementById('ap-stock').value) || 10,
+    discount_percent: parseInt(document.getElementById('ap-discount').value) || 0,
+    vendor: document.getElementById('ap-vendor').value.trim() || 'Abihani Express',
+    location: document.getElementById('ap-location').value.trim() || 'Potiskum, Yobe State',
+    featured: document.getElementById('ap-featured').checked,
+    image_url: mainUrl,
+    image_urls: JSON.stringify(extraUrls),
+    image_icon: '📦',
+    owner_email: ownerEmail,
+    owner_whatsapp: ''
+});
     closeAdminModal(); showToast('Product added!', 'success'); renderAdminPanels();
 }
+// ============ BULK UPLOAD ============
+function showBulkUploadForm() {
+    // Check for draft
+    var draft = null;
+    try { draft = JSON.parse(localStorage.getItem('abihani_bulk_draft')); } catch(e) {}
+    
+    var html = '<h3>📤 Bulk Upload</h3>';
+    html += '<p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Select multiple images. Each image becomes a product.</p>';
+    
+    // Draft indicator
+    if (draft && draft.images && draft.images.length > 0) {
+        html += '<div style="background:#fef9f0;border:1px solid var(--accent);border-radius:8px;padding:10px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">';
+        html += '<span style="font-size:13px;">📋 Draft: ' + draft.images.length + ' images ready</span>';
+        html += '<div style="display:flex;gap:6px;"><button class="btn-secondary btn-sm" onclick="restoreBulkDraft()">Restore</button><button class="btn-danger btn-sm" onclick="clearBulkDraft()">Discard</button></div>';
+        html += '</div>';
+    }
+    
+    html += '<label>Product Name <span style="color:var(--text-muted);font-weight:400;">(Optional — applied to all)</span></label>';
+    html += '<input id="bulk-name" class="admin-input" placeholder="e.g. Handcrafted Leather Bag" value="' + (draft ? draft.name || '' : '') + '">';
+    
+    html += '<label>Category <span style="color:var(--text-muted);font-weight:400;">(Optional)</span></label>';
+    html += '<select id="bulk-category" class="admin-input">';
+    html += '<option value="">None</option>';
+    var allCats = allCategories.filter(function(c){return !c.is_mock;});
+    for (var i = 0; i < allCats.length; i++) {
+        var selected = (draft && draft.categoryId == allCats[i].id) ? 'selected' : '';
+        html += '<option value="' + allCats[i].id + '" ' + selected + '>' + (allCats[i].emoji || '') + ' ' + allCats[i].name + '</option>';
+    }
+    html += '</select>';
+    
+    html += '<label>Description <span style="color:var(--text-muted);font-weight:400;">(Optional — applied to all)</span></label>';
+    html += '<textarea id="bulk-desc" class="admin-input" rows="2" placeholder="Brief description for all products">' + (draft ? draft.description || '' : '') + '</textarea>';
+    
+    html += '<label>Select Images *</label>';
+    html += '<input type="file" id="bulk-images" accept="image/*" multiple class="admin-input" onchange="saveBulkDraft()">';
+    
+    // Preview area
+    html += '<div id="bulk-preview-area" style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;max-height:200px;overflow-y:auto;padding:8px;background:var(--bg-secondary);border-radius:var(--radius-sm);">';
+    if (draft && draft.images) {
+        for (var j = 0; j < draft.images.length; j++) {
+            html += '<div style="position:relative;width:60px;height:60px;border-radius:6px;overflow:hidden;border:1px solid var(--border);flex-shrink:0;">';
+            html += '<img src="' + draft.images[j] + '" style="width:100%;height:100%;object-fit:cover;">';
+            html += '</div>';
+        }
+    }
+    html += '</div>';
+    
+    html += '<div style="display:flex;gap:8px;margin:12px 0;">';
+    html += '<button class="btn-primary" style="flex:1;" onclick="processBulkUpload()"><i class="fas fa-upload"></i> Upload All</button>';
+    html += '<button class="btn-secondary" onclick="closeAdminModal()">Cancel</button>';
+    html += '</div>';
+    
+    html += '<p style="font-size:11px;color:var(--text-muted);text-align:center;">Auto-saves draft as you select images. All fields editable after upload.</p>';
+    openAdminModal(html);
+}
 
+function saveBulkDraft() {
+    var files = document.getElementById('bulk-images').files;
+    if (!files || files.length === 0) return;
+    
+    var readerPromises = [];
+    for (var i = 0; i < files.length; i++) {
+        readerPromises.push(new Promise(function(resolve) {
+            var reader = new FileReader();
+            reader.onload = function(e) { resolve(e.target.result); };
+            reader.readAsDataURL(files[i]);
+        }));
+    }
+    Promise.all(readerPromises).then(function(results) {
+        var draft = {
+            images: results,
+            name: document.getElementById('bulk-name').value,
+            categoryId: document.getElementById('bulk-category').value,
+            description: document.getElementById('bulk-desc').value,
+            timestamp: Date.now()
+        };
+        localStorage.setItem('abihani_bulk_draft', JSON.stringify(draft));
+        
+        var preview = document.getElementById('bulk-preview-area');
+        if (preview) {
+            preview.innerHTML = '';
+            for (var j = 0; j < results.length; j++) {
+                preview.innerHTML += '<div style="position:relative;width:60px;height:60px;border-radius:6px;overflow:hidden;border:1px solid var(--border);flex-shrink:0;"><img src="' + results[j] + '" style="width:100%;height:100%;object-fit:cover;"></div>';
+            }
+        }
+    });
+}
+
+function restoreBulkDraft() {
+    var draft = null;
+    try { draft = JSON.parse(localStorage.getItem('abihani_bulk_draft')); } catch(e) {}
+    if (!draft) return;
+    document.getElementById('bulk-name').value = draft.name || '';
+    document.getElementById('bulk-category').value = draft.categoryId || '';
+    document.getElementById('bulk-desc').value = draft.description || '';
+    var preview = document.getElementById('bulk-preview-area');
+    if (preview && draft.images) {
+        preview.innerHTML = '';
+        for (var i = 0; i < draft.images.length; i++) {
+            preview.innerHTML += '<div style="position:relative;width:60px;height:60px;border-radius:6px;overflow:hidden;border:1px solid var(--border);flex-shrink:0;"><img src="' + draft.images[i] + '" style="width:100%;height:100%;object-fit:cover;"></div>';
+        }
+    }
+    showToast('Draft restored!', 'success');
+}
+
+function clearBulkDraft() {
+    if (!confirm('Discard draft and selected images?')) return;
+    localStorage.removeItem('abihani_bulk_draft');
+    document.getElementById('bulk-preview-area').innerHTML = '';
+    document.getElementById('bulk-images').value = '';
+    showToast('Draft cleared', 'info');
+}
+
+async function processBulkUpload() {
+    var name = document.getElementById('bulk-name').value.trim() || CONFIG.BULK_UPLOAD_DEFAULTS.name;
+    var categoryId = document.getElementById('bulk-category').value || null;
+    var description = document.getElementById('bulk-desc').value.trim() || CONFIG.BULK_UPLOAD_DEFAULTS.description;
+    var files = document.getElementById('bulk-images').files;
+    
+    if (!files || files.length === 0) {
+        showToast('Select at least one image', 'error');
+        return;
+    }
+    
+    var ownerEmail = viewingAdminEmail || currentUserEmail;
+    var categoryToUse = categoryId;
+    
+    // If no category selected, find or create "More Products"
+    if (!categoryToUse) {
+        var existingCat = allCategories.find(function(c) { return c.name === CONFIG.BULK_UPLOAD_DEFAULTS.category && c.owner_email === ownerEmail && !c.is_mock; });
+        if (existingCat) {
+            categoryToUse = existingCat.id;
+        } else {
+            var newCat = await supabase.from('categories').insert({
+                name: CONFIG.BULK_UPLOAD_DEFAULTS.category,
+                emoji: '📦',
+                sort_order: allCategories.length + 1,
+                owner_email: ownerEmail
+            }).select().single();
+            if (newCat.data) {
+                categoryToUse = newCat.data.id;
+                allCategories.push(newCat.data);
+            }
+        }
+    }
+    
+    var total = files.length;
+    var uploaded = 0;
+    var errors = 0;
+    
+    showToast('Uploading ' + total + ' products...', 'info');
+    
+    for (var i = 0; i < files.length; i++) {
+        try {
+            var file = files[i];
+            var ext = file.name.split('.').pop();
+            var filename = 'products/' + Date.now() + '_' + i + '.' + ext;
+            var uploadResult = await supabase.storage.from('images').upload(filename, file);
+            
+            var imageUrl = '';
+            if (!uploadResult.error) {
+                imageUrl = supabase.storage.from('images').getPublicUrl(filename).data.publicUrl;
+            }
+            
+            var productName = name;
+            if (total === 1) {
+                productName = file.name.replace(/\.[^.]+$/, '') || name;
+            }
+            if (total > 1) {
+                productName = name + ' ' + (i + 1);
+            }
+            
+            // Use bulk upload defaults for price (text)
+            var priceText = CONFIG.BULK_UPLOAD_DEFAULTS.price;
+            
+            await supabase.from('products').insert({
+                name: productName,
+                price: priceText,
+                price_numeric: null,
+                category_id: categoryToUse,
+                subcategory_id: null,
+                description: description,
+                image_url: imageUrl,
+                image_urls: JSON.stringify([]),
+                image_icon: '📦',
+                rating: CONFIG.BULK_UPLOAD_DEFAULTS.rating,
+                review_count: CONFIG.BULK_UPLOAD_DEFAULTS.review_count,
+                stock_quantity: CONFIG.BULK_UPLOAD_DEFAULTS.stock_quantity,
+                discount_percent: CONFIG.BULK_UPLOAD_DEFAULTS.discount_percent,
+                vendor: CONFIG.BULK_UPLOAD_DEFAULTS.vendor,
+                location: CONFIG.BULK_UPLOAD_DEFAULTS.location,
+                featured: CONFIG.BULK_UPLOAD_DEFAULTS.featured,
+                owner_email: ownerEmail,
+                owner_whatsapp: ''
+            });
+            uploaded++;
+        } catch(e) {
+            errors++;
+            console.error('Upload error for file ' + i, e);
+        }
+    }
+    
+    localStorage.removeItem('abihani_bulk_draft');
+    closeAdminModal();
+    await loadDynamicData();
+    renderAdminPanels();
+    
+    if (errors > 0) {
+        showToast(uploaded + ' uploaded, ' + errors + ' failed', 'error');
+    } else {
+        showToast('✅ ' + uploaded + ' products uploaded!', 'success');
+    }
+}
 // ============ EDIT PRODUCT ============
 function renderEditProduct(id) {
     var p = allProducts.find(function(x) { return x.id == id; }); if (!p) return;
@@ -1123,7 +1488,10 @@ function renderEditProduct(id) {
     var catOpts = allCategories.map(function(c) { return '<option value="' + c.id + '"' + (c.id == p.category_id ? ' selected' : '') + '>' + (c.emoji || '') + ' ' + c.name + '</option>'; }).join('');
     var html = '<h3>✏️ Edit Product</h3>';
     html += '<label>Product Name</label><input id="ep-name" class="admin-input" value="' + p.name + '">';
-    html += '<label>Price (₦)</label><input id="ep-price" class="admin-input" type="number" value="' + p.price + '">';
+    html += '<label>Price <span style="color:var(--text-muted);font-weight:400;">(Optional — text or number)</span></label>';
+var priceDisplay = p.price || CONFIG.PRODUCT_DEFAULT_PRICE_TEXT;
+if (typeof p.price_numeric === 'number') priceDisplay = p.price_numeric;
+html += '<input id="ep-price" class="admin-input" type="text" value="' + priceDisplay + '" placeholder="e.g. 15000 or Ask on WhatsApp">';
     html += '<label>Category</label><select id="ep-category" class="admin-input" onchange="updateEditSubcats()">' + catOpts + '</select>';
     html += '<label>Subcategory</label><select id="ep-subcategory" class="admin-input"><option value="">None</option></select>';
     html += '<label>Description</label><textarea id="ep-desc" class="admin-input" rows="2">' + (p.description || '') + '</textarea>';
@@ -1150,9 +1518,33 @@ function renderEditProduct(id) {
 function addSidePicker() { var c = document.getElementById('side-images-container'); var d = document.createElement('div'); d.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0'; d.innerHTML = '<input type="file" accept="image/*" class="side-picker" style="font-size:12px;flex:1"><button class="btn-danger btn-sm" onclick="removeSideRow(this)">✕</button>'; c.appendChild(d); }
 function removeSideRow(btn) { var row = btn.parentElement; var idx = row.getAttribute('data-index'); if (idx !== null) { var removed = JSON.parse(document.getElementById('side-removed').value || '[]'); removed.push(parseInt(idx)); document.getElementById('side-removed').value = JSON.stringify(removed); } row.remove(); }
 async function saveEditProduct(id) {
-    var name = document.getElementById('ep-name').value.trim(); var price = parseInt(document.getElementById('ep-price').value);
-    if (!name || !price) { showToast('Name and price required', 'error'); return; }
-    var updates = { name: name, price: price, category_id: document.getElementById('ep-category').value || null, subcategory_id: document.getElementById('ep-subcategory').value || null, description: document.getElementById('ep-desc').value.trim(), rating: parseFloat(document.getElementById('ep-rating').value) || 4.5, review_count: parseInt(document.getElementById('ep-reviews').value) || 0, stock_quantity: parseInt(document.getElementById('ep-stock').value) || 10, discount_percent: parseInt(document.getElementById('ep-discount').value) || 0, vendor: document.getElementById('ep-vendor').value.trim(), location: document.getElementById('ep-location').value.trim(), featured: document.getElementById('ep-featured').checked };
+    var name = document.getElementById('ep-name').value.trim();
+var priceInput = document.getElementById('ep-price').value.trim();
+if (!name) { showToast('Name is required', 'error'); return; }
+
+// Process price
+var price = priceInput || CONFIG.PRODUCT_DEFAULT_PRICE_TEXT;
+var priceNumeric = null;
+var cleanPrice = priceInput.replace(/,/g, '').trim();
+if (/^[\d]+$/.test(cleanPrice)) {
+    priceNumeric = parseInt(cleanPrice);
+    price = '₦' + priceNumeric.toLocaleString();
+}
+    var updates = {
+    name: name,
+    price: price,
+    price_numeric: priceNumeric,
+    category_id: document.getElementById('ep-category').value || null,
+    subcategory_id: document.getElementById('ep-subcategory').value || null,
+    description: document.getElementById('ep-desc').value.trim(),
+    rating: parseFloat(document.getElementById('ep-rating').value) || 4.5,
+    review_count: parseInt(document.getElementById('ep-reviews').value) || 0,
+    stock_quantity: parseInt(document.getElementById('ep-stock').value) || 10,
+    discount_percent: parseInt(document.getElementById('ep-discount').value) || 0,
+    vendor: document.getElementById('ep-vendor').value.trim(),
+    location: document.getElementById('ep-location').value.trim(),
+    featured: document.getElementById('ep-featured').checked
+};
     if (document.getElementById('ep-image-removed').value === 'true') { updates.image_url = ''; updates.image_icon = '📦'; }
     var imgFile = document.getElementById('ep-main-image').files[0]; if (imgFile) { var ext = imgFile.name.split('.').pop(); var fn = 'products/' + Date.now() + '_main.' + ext; var up = await supabase.storage.from('images').upload(fn, imgFile); if (!up.error) updates.image_url = supabase.storage.from('images').getPublicUrl(fn).data.publicUrl; }
     var keptUrls = []; var removedIndices = JSON.parse(document.getElementById('side-removed').value || '[]');
@@ -1232,9 +1624,14 @@ function openCustomOrderPopup() {
     document.getElementById('custom-order-popup-subtitle').textContent = CONFIG.CUSTOM_ORDER_SUBTITLE;
     var form = document.getElementById('custom-order-form'); if (!form) return;
     var h = '';
-    for (var f = 0; f < CONFIG.CUSTOM_ORDER_FIELDS.length; f++) { var fd = CONFIG.CUSTOM_ORDER_FIELDS[f]; h += '<label style="font-size:13px;font-weight:500;margin-top:8px;display:block">' + fd.label + (fd.required ? ' *' : ' <span style="color:var(--text-muted)">(Optional)</span>') + '</label>'; if (fd.type === 'textarea') h += '<textarea name="co_' + f + '" placeholder="' + fd.placeholder + '" ' + (fd.required ? 'required' : '') + ' rows="3" style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;font-family:inherit;background:var(--bg-primary);color:var(--text-primary)"></textarea>'; else h += '<input type="' + fd.type + '" name="co_' + f + '" placeholder="' + fd.placeholder + '" ' + (fd.required ? 'required' : '') + ' style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;background:var(--bg-primary);color:var(--text-primary)">'; }
+    h += '<label style="font-size:13px;font-weight:500;margin-top:8px;display:block">Full Name *</label>';
+    h += '<input type="text" name="co_0" placeholder="Enter your full name" required style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;background:var(--bg-primary);color:var(--text-primary)">';
+    h += '<label style="font-size:13px;font-weight:500;margin-top:8px;display:block">Request Details *</label>';
+    h += '<textarea name="co_1" placeholder="Describe what you want (product, size, colour, customization, etc.)" required rows="3" style="width:100%;padding:12px;border-radius:25px;border:1px solid var(--border);margin:4px 0;font-family:inherit;background:var(--bg-primary);color:var(--text-primary)"></textarea>';
     h += '<button type="submit" class="btn-submit-order"><i class="fab fa-whatsapp"></i> Send via WhatsApp</button>';
-    form.innerHTML = h; document.getElementById('custom-order-popup').style.display = 'flex'; document.body.style.overflow = 'hidden';
+    form.innerHTML = h;
+    document.getElementById('custom-order-popup').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
 }
 function closeCustomOrderPopup() { document.getElementById('custom-order-popup').style.display = 'none'; document.body.style.overflow = ''; }
 function submitCustomOrder(e) {
