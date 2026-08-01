@@ -40,32 +40,6 @@ function showToast(msg, type) {
     setTimeout(function() { if (t.parentElement) t.remove(); }, 6000);
 }
 
-// ============ DATA CACHING UTILITIES ============
-function getCachedData(key) {
-    try {
-        var raw = localStorage.getItem(key);
-        if (!raw) return null;
-        var data = JSON.parse(raw);
-        if (Date.now() - data.timestamp > 300000) {
-            localStorage.removeItem(key);
-            return null;
-        }
-        return data;
-    } catch(e) {
-        return null;
-    }
-}
-
-function setCachedData(key, data) {
-    try {
-        localStorage.setItem(key, JSON.stringify(data));
-    } catch(e) {}
-}
-
-function invalidateCache() {
-    localStorage.removeItem('abihani_products_cache');
-}
-
 // ============ PRICE DISPLAY UTILITY ============
 function getDisplayPrice(product) {
     if (typeof product.price_numeric === 'number') {
@@ -304,86 +278,40 @@ function showAllSkeletons() {
 }
 
 // ============ LOAD DATA ============
-async function loadDynamicData(forceRefresh) {
-    if (forceRefresh) {
-        invalidateCache();
-    }
-    var cacheData = getCachedData('abihani_products_cache');
-    if (cacheData && !forceRefresh) {
-        allCategories = cacheData.categories || [];
-        allSubcategories = cacheData.subcategories || [];
-        allProducts = cacheData.products || [];
-        announcementText = cacheData.announcementText || CONFIG.UI_ANNOUNCEMENT_DEFAULT;
-        mockDataActive = cacheData.mockDataActive !== undefined ? cacheData.mockDataActive : CONFIG.MOCK_DATA_ENABLED !== false;
-        maintenanceModeActive = cacheData.maintenanceModeActive || CONFIG.MAINTENANCE_MODE_ENABLED || false;
-
-        if (mockDataActive) mergeMockData();
-        updateCategoriesHome();
-        updateShopCategories();
-        updateFeaturedProducts();
-        var ag = document.getElementById('all-products-grid');
-        if (ag) renderAllProducts();
-        return allProducts;
+async function loadDynamicData() {
+    try {
+        var c = await supabase.from('categories').select('*').order('sort_order');
+        allCategories = c.data || [];
+    } catch(e) {
+        console.error('Failed to load categories:', e);
+        allCategories = [];
     }
 
     try {
-        var results = await Promise.all([
-            supabase.from('categories').select('*').order('sort_order'),
-            supabase.from('subcategories').select('*'),
-            supabase.from('products').select('*').order('id'),
-            supabase.from('site_settings').select('*').eq('id', 1).single()
-        ]);
-
-        var c = results[0];
-        var s = results[1];
-        var p = results[2];
-        var a = results[3];
-
-        allCategories = c.data || [];
+        var s = await supabase.from('subcategories').select('*');
         allSubcategories = s.data || [];
-        allProducts = p.data || [];
+    } catch(e) {
+        console.error('Failed to load subcategories:', e);
+        allSubcategories = [];
+    }
 
+    try {
+        var p = await supabase.from('products').select('*').order('id');
+        allProducts = p.data || [];
+    } catch(e) {
+        console.error('Failed to load products:', e);
+        allProducts = [];
+    }
+
+    try {
+        var a = await supabase.from('site_settings').select('*').eq('id', 1).single();
         if (a.data) {
             if (a.data.announcement_text) { announcementText = a.data.announcement_text; var atEl = document.getElementById('announcement-text'); if (atEl) atEl.textContent = announcementText; }
             if (a.data.mock_data_enabled !== undefined) mockDataActive = a.data.mock_data_enabled;
             if (a.data.maintenance_mode !== undefined) maintenanceModeActive = a.data.maintenance_mode;
         }
-
-        setCachedData('abihani_products_cache', {
-            categories: allCategories,
-            subcategories: allSubcategories,
-            products: allProducts,
-            announcementText: announcementText,
-            mockDataActive: mockDataActive,
-            maintenanceModeActive: maintenanceModeActive,
-            timestamp: Date.now()
-        });
-
     } catch(e) {
-        console.error('Failed to load data:', e);
-        try {
-            var c = await supabase.from('categories').select('*').order('sort_order');
-            allCategories = c.data || [];
-        } catch(e2) { allCategories = []; }
-
-        try {
-            var s = await supabase.from('subcategories').select('*');
-            allSubcategories = s.data || [];
-        } catch(e2) { allSubcategories = []; }
-
-        try {
-            var p = await supabase.from('products').select('*').order('id');
-            allProducts = p.data || [];
-        } catch(e2) { allProducts = []; }
-
-        try {
-            var a = await supabase.from('site_settings').select('*').eq('id', 1).single();
-            if (a.data) {
-                if (a.data.announcement_text) { announcementText = a.data.announcement_text; var atEl = document.getElementById('announcement-text'); if (atEl) atEl.textContent = announcementText; }
-                if (a.data.mock_data_enabled !== undefined) mockDataActive = a.data.mock_data_enabled;
-                if (a.data.maintenance_mode !== undefined) maintenanceModeActive = a.data.maintenance_mode;
-            }
-        } catch(e2) { console.error('Failed to load site settings:', e2); }
+        console.error('Failed to load site settings:', e);
     }
 
     if (mockDataActive) mergeMockData();
@@ -623,13 +551,7 @@ function productCardHTML(p) {
     if (half) stars += '<i class="fas fa-star-half-alt"></i>';
     for (var i = 0; i < empty; i++) stars += '<i class="far fa-star"></i>';
     var rc = (p.review_count && p.review_count > 0) ? p.review_count : Math.floor(Math.random() * 235) + 12;
-    var imgUrl = p.image_url;
-    if (imgUrl) {
-        if (imgUrl.indexOf('cache-control=') === -1) {
-            imgUrl = imgUrl + (imgUrl.indexOf('?') === -1 ? '?' : '&') + 'cache-control=max-age=86400';
-        }
-    }
-    var imgHtml = imgUrl ? '<img src="' + imgUrl + '" alt="' + p.name + '" loading="lazy" fetchpriority="' + (p.featured ? 'high' : 'auto') + '">' : '<div style="font-size:40px;display:flex;align-items:center;justify-content:center;height:100%">' + (p.image_icon || CONFIG.PRODUCT_DEFAULT_ICON) + '</div>';
+    var imgHtml = p.image_url ? '<img src="' + p.image_url + '" alt="' + p.name + '" loading="lazy">' : '<div style="font-size:40px;display:flex;align-items:center;justify-content:center;height:100%">' + (p.image_icon || CONFIG.PRODUCT_DEFAULT_ICON) + '</div>';
 
     var displayPrice = getDisplayPrice(p);
     var priceHtml = '<div class="product-price">' + displayPrice + '</div>';
@@ -644,34 +566,103 @@ function productCardHTML(p) {
     return '<div class="product-card" onclick="showProductDetail(\'' + p.id + '\', \'shop\')"><div class="product-image">' + imgHtml + '</div><div class="product-info"><h4>' + (p.name || '') + '</h4>' + priceHtml + '<div class="product-rating">' + stars + ' (' + rc + ')</div><div class="product-vendor"><i class="fas fa-store"></i> ' + (p.vendor || CONFIG.PRODUCT_DEFAULT_VENDOR) + '</div><button class="btn-wa-small" onclick="event.stopPropagation();buyNow(\'' + p.id + '\')"><i class="fab fa-whatsapp"></i> ' + CONFIG.UI_BUY_NOW + '</button></div></div>';
 }
 
-// ============ FEATURED PRODUCTS - HORIZONTAL SCROLL (NO CAROUSEL) ============
+// ============ FEATURED PRODUCTS CAROUSEL ============
+var featuredCarouselInterval = null;
+
 function updateFeaturedProducts() {
-    var container = document.getElementById('featured-products');
-    if (!container) return;
+    var c = document.getElementById('featured-products');
+    if (!c) return;
 
-    // Get featured products
-    var featured = allProducts.filter(function(p) { return p.featured; });
+    var feat = allProducts.filter(function(p) { return p.featured; });
+    feat = feat.sort(function() { return 0.5 - Math.random(); });
 
-    if (featured.length === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.UI_NO_FEATURED_PRODUCTS + '</p></div>';
+    if (feat.length === 0) {
+        c.innerHTML = '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.UI_NO_FEATURED_PRODUCTS + '</p></div>';
         return;
     }
 
-    // Build horizontal scrollable list - matches the existing .product-scroll style
-    var html = '<div class="product-scroll" style="display:flex;gap:14px;overflow-x:auto;padding:4px 4px 12px;scrollbar-width:thin;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;">';
-    for (var i = 0; i < featured.length; i++) {
-        html += '<div style="flex:0 0 170px;scroll-snap-align:start;">' + productCardHTML(featured[i]) + '</div>';
+    var html = '<div class="featured-carousel">';
+    html += '<div class="featured-carousel-track" id="featured-carousel-track">';
+    for (var i = 0; i < feat.length; i++) {
+        html += '<div class="featured-carousel-slide">' + productCardHTML(feat[i]) + '</div>';
     }
     html += '</div>';
 
-    // Small subtle hint below the "See all →" link (rendered via CSS)
-    if (featured.length > 3) {
-        html += '<div style="text-align:right;font-size:10px;color:var(--text-muted);margin-top:-4px;padding-right:4px;font-style:italic;">← scroll for more</div>';
+    if (feat.length > 3) {
+        html += '<button class="carousel-arrow carousel-prev" onclick="moveFeaturedCarousel(-1)"><i class="fas fa-chevron-left"></i></button>';
+        html += '<button class="carousel-arrow carousel-next" onclick="moveFeaturedCarousel(1)"><i class="fas fa-chevron-right"></i></button>';
+        html += '<div class="carousel-dots" id="featured-carousel-dots"></div>';
     }
+    html += '</div>';
+    c.innerHTML = html;
 
-    container.innerHTML = html;
+    if (feat.length > 3) {
+        var track = document.getElementById('featured-carousel-track');
+        var totalSlides = feat.length;
+        var visibleSlides = CONFIG.FEATURED_CAROUSEL_VISIBLE || 3;
+        var slideWidth = 100 / visibleSlides;
+        var maxPos = Math.max(0, totalSlides - visibleSlides);
+
+        track.style.width = (totalSlides * slideWidth) + '%';
+        track.querySelectorAll('.featured-carousel-slide').forEach(function(slide) {
+            slide.style.width = (100 / totalSlides) + '%';
+        });
+
+        var dotsContainer = document.getElementById('featured-carousel-dots');
+        if (dotsContainer) {
+            dotsContainer.innerHTML = '';
+            for (var j = 0; j <= maxPos; j++) {
+                var dot = document.createElement('span');
+                dot.className = 'carousel-dot' + (j === 0 ? ' active' : '');
+                dot.onclick = (function(idx) { return function() { goToFeaturedSlide(idx); }; })(j);
+                dotsContainer.appendChild(dot);
+            }
+        }
+
+        clearInterval(featuredCarouselInterval);
+        featuredCarouselInterval = setInterval(function() {
+            moveFeaturedCarousel(1);
+        }, CONFIG.FEATURED_CAROUSEL_INTERVAL || 5000);
+
+        window._featuredCarousel = {
+            track: track,
+            totalSlides: totalSlides,
+            visibleSlides: visibleSlides,
+            slideWidth: slideWidth,
+            currentPos: 0,
+            maxPos: maxPos
+        };
+    }
 }
 
+function moveFeaturedCarousel(direction) {
+    var data = window._featuredCarousel;
+    if (!data) return;
+
+    var newPos = data.currentPos + direction;
+    if (newPos < 0) newPos = data.maxPos;
+    if (newPos > data.maxPos) newPos = 0;
+    goToFeaturedSlide(newPos);
+}
+
+function goToFeaturedSlide(index) {
+    var data = window._featuredCarousel;
+    if (!data) return;
+
+    data.currentPos = index;
+    data.track.style.transform = 'translateX(-' + (index * data.slideWidth) + '%)';
+
+    var dots = document.querySelectorAll('.carousel-dot');
+    for (var i = 0; i < dots.length; i++) {
+        dots[i].classList.toggle('active', i === index);
+    }
+}
+
+function renderAllProducts() {
+    var c = document.getElementById('all-products-grid'); if (!c) return;
+    var items = currentFilterCategory ? allProducts.filter(function(p) { return p.category_id == currentFilterCategory; }) : allProducts;
+    c.innerHTML = items.length ? items.map(productCardHTML).join('') : '<div class="empty-state"><i class="fas fa-box-open"></i><p>' + CONFIG.EMPTY_PRODUCTS + '</p></div>';
+}
 // ============ PRODUCT DETAIL ============
 function showProductDetail(id, source) {
     if (allProducts.length === 0) {
@@ -1171,7 +1162,7 @@ async function saveAnnouncement() {
     showToast('Announcement saved!', 'success');
 }
 
-// ============ ALL PRODUCTS (ADMIN) WITH BULK ACTIONS ============
+// ============ ALL PRODUCTS (ADMIN) WITH BULK DELETE ============
 function renderAllProductsAdmin() {
     var ownerFilter = viewingAdminEmail || currentUserEmail;
     var prods = allProducts.filter(function(p) { return currentUserIsCEO && !viewingAdminEmail ? !p.is_mock : (p.owner_email === ownerFilter && !p.is_mock); });
@@ -1184,18 +1175,8 @@ function renderAllProductsAdmin() {
 
     html += '<div class="bulk-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:var(--bg-secondary);border-radius:var(--radius-sm);">';
     html += '<label style="font-size:13px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="select-all-products" onchange="toggleAllProducts()"> Select All</label>';
-    html += '<button class="btn-danger btn-sm" id="bulk-delete-btn" onclick="bulkDeleteProducts()" disabled>🗑️ Delete</button>';
-    html += '<button class="btn-primary btn-sm" id="bulk-featured-btn" onclick="bulkSetFeatured(true)" disabled>⭐ Set Featured</button>';
-    html += '<button class="btn-secondary btn-sm" id="bulk-unfeatured-btn" onclick="bulkSetFeatured(false)" disabled>☆ Remove Featured</button>';
+    html += '<button class="btn-danger btn-sm" id="delete-selected-btn" onclick="bulkDeleteProducts()" disabled>🗑️ Delete Selected</button>';
     html += '<span id="selected-count" style="font-size:12px;color:var(--text-muted);margin-left:auto;">0 selected</span>';
-    html += '</div>';
-
-    // Add featured order management section
-    html += '<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-secondary);border-radius:var(--radius-sm);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
-    html += '<span style="font-size:12px;font-weight:600;">⚡ Featured Order:</span>';
-    html += '<input type="number" id="featured-order-input" value="1" min="1" style="width:60px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);">';
-    html += '<button class="btn-primary btn-sm" onclick="bulkSetFeaturedOrder()">Update Order</button>';
-    html += '<span style="font-size:10px;color:var(--text-muted);margin-left:4px;">(Set order for selected products)</span>';
     html += '</div>';
 
     if (prods.length === 0) {
@@ -1204,7 +1185,6 @@ function renderAllProductsAdmin() {
         for (var i = 0; i < prods.length; i++) {
             var p = prods[i];
             var displayPrice = getDisplayPrice(p);
-            var orderDisplay = (p.featured_order !== undefined && p.featured_order !== null) ? ' #' + p.featured_order : '';
 
             html += '<div class="item-row" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);">';
             html += '<input type="checkbox" class="product-select-checkbox" data-id="' + p.id + '" onchange="updateBulkSelectUI()">';
@@ -1212,7 +1192,7 @@ function renderAllProductsAdmin() {
             html += (p.image_url ? '<img src="' + p.image_url + '" style="width:40px;height:40px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle">' : '<span style="font-size:24px;margin-right:8px;vertical-align:middle">' + (p.image_icon || '📦') + '</span>');
             html += '<strong>' + p.name + '</strong>';
             html += '<br><small style="color:var(--accent)">' + displayPrice + '</small>';
-            if (p.featured) html += ' ⭐' + orderDisplay;
+            if (p.featured) html += ' ⭐';
             html += '</div>';
             html += '<span style="font-size:20px;color:var(--accent);">›</span>';
             html += '</div>';
@@ -1243,11 +1223,8 @@ function updateBulkSelectUI() {
     var count = checked.length;
     var countEl = document.getElementById('selected-count');
     if (countEl) countEl.textContent = count + ' selected';
-    var btns = ['bulk-delete-btn', 'bulk-featured-btn', 'bulk-unfeatured-btn'];
-    for (var b = 0; b < btns.length; b++) {
-        var btn = document.getElementById(btns[b]);
-        if (btn) btn.disabled = count === 0;
-    }
+    var btn = document.getElementById('delete-selected-btn');
+    if (btn) btn.disabled = count === 0;
     var selectAll = document.getElementById('select-all-products');
     if (selectAll) {
         var total = checkboxes.length;
@@ -1274,86 +1251,13 @@ function bulkDeleteProducts() {
         } else {
             showToast(successCount + ' of ' + count + ' products deleted. Some failed.', 'error');
         }
-        loadDynamicData(true).then(function() {
+        loadDynamicData().then(function() {
             renderAllProductsAdmin();
-            updateFeaturedProducts();
         });
     }).catch(function() {
         showToast('Error deleting products. Please try again.', 'error');
     });
 }
-
-function bulkSetFeatured(featured) {
-    if (selectedProductIds.length === 0) return;
-    var action = featured ? 'feature' : 'unfeature';
-    if (!confirm('Set ' + selectedProductIds.length + ' products as ' + (featured ? 'featured' : 'not featured') + '?')) return;
-
-    var promises = [];
-    for (var i = 0; i < selectedProductIds.length; i++) {
-        var updateData = { featured: featured };
-        if (featured) {
-            // Set a default order if featuring
-            updateData.featured_order = 0;
-        } else {
-            updateData.featured_order = null;
-        }
-        promises.push(supabase.from('products').update(updateData).eq('id', selectedProductIds[i]));
-    }
-
-    Promise.all(promises).then(function(results) {
-        var successCount = results.filter(function(r) { return !r.error; }).length;
-        if (successCount === selectedProductIds.length) {
-            showToast(selectedProductIds.length + ' products ' + (featured ? 'featured!' : 'unfeatured!'), 'success');
-        } else {
-            showToast(successCount + ' of ' + selectedProductIds.length + ' updated. Some failed.', 'error');
-        }
-        // Reset selection
-        selectedProductIds = [];
-        loadDynamicData(true).then(function() {
-            renderAllProductsAdmin();
-            updateFeaturedProducts();
-            updateBulkSelectUI();
-        });
-    }).catch(function() {
-        showToast('Error updating products.', 'error');
-    });
-}
-
-function bulkSetFeaturedOrder() {
-    if (selectedProductIds.length === 0) return;
-    var orderInput = document.getElementById('featured-order-input');
-    var startOrder = parseInt(orderInput.value) || 1;
-    if (startOrder < 1) startOrder = 1;
-
-    if (!confirm('Set featured order starting from ' + startOrder + ' for ' + selectedProductIds.length + ' selected products?')) return;
-
-    var promises = [];
-    for (var i = 0; i < selectedProductIds.length; i++) {
-        var order = startOrder + i;
-        promises.push(supabase.from('products').update({
-            featured: true,
-            featured_order: order
-        }).eq('id', selectedProductIds[i]));
-    }
-
-    Promise.all(promises).then(function(results) {
-        var successCount = results.filter(function(r) { return !r.error; }).length;
-        if (successCount === selectedProductIds.length) {
-            showToast(selectedProductIds.length + ' products order updated!', 'success');
-        } else {
-            showToast(successCount + ' of ' + selectedProductIds.length + ' updated. Some failed.', 'error');
-        }
-        selectedProductIds = [];
-        loadDynamicData(true).then(function() {
-            renderAllProductsAdmin();
-            updateFeaturedProducts();
-            updateBulkSelectUI();
-        });
-    }).catch(function() {
-        showToast('Error updating product order.', 'error');
-    });
-}
-
 // ============ CATEGORIES LIST (ADMIN) ============
 function renderCategoriesListAdmin() {
     var ownerFilter = viewingAdminEmail || currentUserEmail;
@@ -1448,7 +1352,6 @@ async function saveNewProduct() {
         vendor: document.getElementById('ap-vendor').value.trim() || 'Abihani Express',
         location: document.getElementById('ap-location').value.trim() || 'Potiskum, Yobe State',
         featured: document.getElementById('ap-featured').checked,
-        featured_order: document.getElementById('ap-featured').checked ? 0 : null,
         image_url: mainUrl,
         image_urls: JSON.stringify(extraUrls),
         image_icon: '📦',
@@ -1645,7 +1548,6 @@ async function processBulkUpload() {
                 vendor: CONFIG.BULK_UPLOAD_DEFAULTS.vendor,
                 location: CONFIG.BULK_UPLOAD_DEFAULTS.location,
                 featured: CONFIG.BULK_UPLOAD_DEFAULTS.featured,
-                featured_order: CONFIG.BULK_UPLOAD_DEFAULTS.featured ? 0 : null,
                 owner_email: ownerEmail,
                 owner_whatsapp: ''
             });
@@ -1658,7 +1560,7 @@ async function processBulkUpload() {
 
     localStorage.removeItem('abihani_bulk_draft');
     closeAdminModal();
-    await loadDynamicData(true);
+    await loadDynamicData();
     renderAdminPanels();
 
     if (errors > 0) {
@@ -1667,7 +1569,6 @@ async function processBulkUpload() {
         showToast('✅ ' + uploaded + ' products uploaded!', 'success');
     }
 }
-
 // ============ EDIT PRODUCT ============
 function renderEditProduct(id) {
     var p = allProducts.find(function(x) { return x.id == id; }); if (!p) return;
@@ -1689,13 +1590,10 @@ function renderEditProduct(id) {
     html += '<label>Vendor</label><input id="ep-vendor" class="admin-input" value="' + (p.vendor || '') + '">';
     html += '<label>Location</label><input id="ep-location" class="admin-input" value="' + (p.location || '') + '">';
     html += '<label style="font-size:12px"><input type="checkbox" id="ep-featured" ' + (p.featured ? 'checked' : '') + '> Featured</label>';
-    html += '<label>Featured Order <span style="color:var(--text-muted);font-weight:400;">(Lower number = appears first)</span></label>';
-    var orderVal = (p.featured_order !== undefined && p.featured_order !== null) ? p.featured_order : '';
-    html += '<input id="ep-featured-order" class="admin-input" type="number" value="' + orderVal + '" placeholder="Leave blank for auto" min="0">';
-    if (p.image_url) { html += '<label>Current Image</label><div><img src="' + p.image_url + '" class="image-preview" style="max-width:150px;max-height:150px;border-radius:8px;object-fit:cover;border:1px solid var(--border);"><button class="btn-danger btn-sm" onclick="removeMainImage()">✕ Remove</button></div>'; }
+    if (p.image_url) { html += '<label>Current Image</label><div><img src="' + p.image_url + '" class="image-preview"><button class="btn-danger btn-sm" onclick="removeMainImage()">✕ Remove</button></div>'; }
     html += '<label>New Main Image</label><input type="file" id="ep-main-image" accept="image/*" class="admin-input"><input type="hidden" id="ep-image-removed" value="false">';
     html += '<label>Side Images</label><div id="side-images-container">';
-    for (var i = 0; i < sideUrls.length; i++) { html += '<div data-index="' + i + '" style="display:flex;align-items:center;gap:8px;margin:4px 0"><img src="' + sideUrls[i] + '" class="image-preview" style="max-width:80px;max-height:80px;border-radius:4px;object-fit:cover;border:1px solid var(--border);"><button class="btn-danger btn-sm" onclick="removeSideRow(this)">✕</button></div>'; }
+    for (var i = 0; i < sideUrls.length; i++) { html += '<div data-index="' + i + '" style="display:flex;align-items:center;gap:8px;margin:4px 0"><img src="' + sideUrls[i] + '" class="image-preview"><button class="btn-danger btn-sm" onclick="removeSideRow(this)">✕</button></div>'; }
     html += '</div><input type="hidden" id="side-removed" value="[]"><button class="btn-outline btn-sm" onclick="addSidePicker()">+ Add Image</button>';
     html += '<button class="btn-primary" style="width:100%;margin-top:12px" onclick="saveEditProduct(\'' + p.id + '\')">💾 Save Changes</button>';
     html += '<button class="btn-danger" style="width:100%;margin-top:8px" onclick="deleteProductConfirm(\'' + p.id + '\',\'' + p.name.replace(/'/g,"\\'") + '\')">🗑️ Delete Product</button>';
@@ -1720,19 +1618,6 @@ async function saveEditProduct(id) {
         price = '₦' + priceNumeric.toLocaleString();
     }
 
-    var featured = document.getElementById('ep-featured').checked;
-    var featuredOrder = document.getElementById('ep-featured-order').value;
-    var featuredOrderNum = (featuredOrder !== '' && !isNaN(parseInt(featuredOrder))) ? parseInt(featuredOrder) : null;
-
-    // If featured is checked but no order is set, use 0 (will be reordered on save)
-    if (featured && featuredOrderNum === null) {
-        featuredOrderNum = 0;
-    }
-    // If not featured, order should be null
-    if (!featured) {
-        featuredOrderNum = null;
-    }
-
     var updates = {
         name: name,
         price: price,
@@ -1744,10 +1629,9 @@ async function saveEditProduct(id) {
         review_count: parseInt(document.getElementById('ep-reviews').value) || 0,
         stock_quantity: parseInt(document.getElementById('ep-stock').value) || 10,
         discount_percent: parseInt(document.getElementById('ep-discount').value) || 0,
-        vendor: document.getElementById('ep-vendor').value.trim() || 'Abihani Express',
-        location: document.getElementById('ep-location').value.trim() || 'Potiskum, Yobe State',
-        featured: featured,
-        featured_order: featuredOrderNum
+        vendor: document.getElementById('ep-vendor').value.trim(),
+        location: document.getElementById('ep-location').value.trim(),
+        featured: document.getElementById('ep-featured').checked
     };
 
     if (document.getElementById('ep-image-removed').value === 'true') { updates.image_url = ''; updates.image_icon = '📦'; }
@@ -1756,86 +1640,30 @@ async function saveEditProduct(id) {
     for (var i = 0; i < window._editSideUrls.length; i++) { if (removedIndices.indexOf(i) === -1) keptUrls.push(window._editSideUrls[i]); }
     var pickers = document.querySelectorAll('.side-picker'); for (var j = 0; j < pickers.length; j++) { if (pickers[j].files && pickers[j].files[0]) { var f = pickers[j].files[0]; var eext = f.name.split('.').pop(); var efn = 'products/' + Date.now() + '_' + j + '_extra.' + eext; var eup = await supabase.storage.from('images').upload(efn, f); if (!eup.error) keptUrls.push(supabase.storage.from('images').getPublicUrl(efn).data.publicUrl); } }
     updates.image_urls = JSON.stringify(keptUrls);
-
-    // Perform the update
-    var result = await supabase.from('products').update(updates).eq('id', id);
-
-    if (result.error) {
-        showToast('Error saving: ' + result.error.message, 'error');
-        return;
-    }
-
-    // If featured is true, reorder all featured products to maintain sequence
-    if (featured) {
-        await reorderFeaturedProducts();
-    }
-
-    // Invalidate cache and reload fresh data
-    await loadDynamicData(true);
-
-    closeAdminModal();
-    showToast('Product updated!', 'success');
-
-    // Re-render the admin dashboard with fresh data
-    renderAdminPanels();
-    updateFeaturedProducts();
-
-    // If we're viewing the product detail page, refresh it
-    if (document.getElementById('product-detail-page').classList.contains('active-page')) {
-        var currentId = id;
-        setTimeout(function() {
-            showProductDetail(currentId, 'shop');
-        }, 300);
-    }
+    await supabase.from('products').update(updates).eq('id', id);
+    closeAdminModal(); showToast('Product updated!', 'success'); renderAdminPanels();
 }
-
-async function reorderFeaturedProducts() {
-    // Get all featured products, ordered by featured_order
-    var featured = allProducts.filter(function(p) { return p.featured; });
-    // Sort by featured_order, then by name
-    featured.sort(function(a, b) {
-        var orderA = a.featured_order !== undefined && a.featured_order !== null ? a.featured_order : 999;
-        var orderB = b.featured_order !== undefined && b.featured_order !== null ? b.featured_order : 999;
-        if (orderA === orderB) {
-            return a.name.localeCompare(b.name);
-        }
-        return orderA - orderB;
-    });
-
-    // Reassign sequential order numbers
-    for (var i = 0; i < featured.length; i++) {
-        var newOrder = i + 1;
-        if (featured[i].featured_order !== newOrder) {
-            await supabase.from('products').update({ featured_order: newOrder }).eq('id', featured[i].id);
-        }
-    }
-}
-
 async function deleteProductConfirm(id, name) {
     if (!confirm('Delete "' + name + '" permanently?')) return;
     await supabase.from('products').delete().eq('id', id);
-    await loadDynamicData(true);
-    closeAdminModal();
-    showToast('Product deleted', 'success');
-    renderAdminPanels();
-    updateFeaturedProducts();
+    closeAdminModal(); showToast('Product deleted', 'success'); renderAdminPanels();
 }
 
 // ============ CATEGORY CRUD ============
 function showAddCategoryForm() { var html = '<h3>➕ Add Category</h3><label>Category Name</label><input id="ac-name" class="admin-input" placeholder="Name"><label>Emoji</label><input id="ac-emoji" class="admin-input" placeholder="e.g. 👞"><button class="btn-primary" style="width:100%" onclick="saveNewCategory()">Save</button>'; openAdminModal(html); }
-async function saveNewCategory() { var name = document.getElementById('ac-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').insert({ name: name, emoji: document.getElementById('ac-emoji').value.trim() || '📁', sort_order: allCategories.length + 1, owner_email: viewingAdminEmail || currentUserEmail }); await loadDynamicData(true); closeAdminModal(); showToast('Category added!', 'success'); renderAdminPanels(); }
+async function saveNewCategory() { var name = document.getElementById('ac-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').insert({ name: name, emoji: document.getElementById('ac-emoji').value.trim() || '📁', sort_order: allCategories.length + 1, owner_email: viewingAdminEmail || currentUserEmail }); closeAdminModal(); showToast('Category added!', 'success'); renderAdminPanels(); }
 function editCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; var html = '<h3>✏️ Edit Category</h3><label>Name</label><input id="ec-name" class="admin-input" value="' + cat.name + '"><label>Emoji</label><input id="ec-emoji" class="admin-input" value="' + (cat.emoji || '') + '"><button class="btn-primary" style="width:100%" onclick="saveEditCategory(\'' + id + '\')">Update</button>'; openAdminModal(html); }
-async function saveEditCategory(id) { var name = document.getElementById('ec-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').update({ name: name, emoji: document.getElementById('ec-emoji').value.trim() }).eq('id', id); await loadDynamicData(true); closeAdminModal(); showToast('Updated!', 'success'); renderCategoriesListAdmin(); }
-async function deleteCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; if (!confirm('Delete "' + cat.name + '" and all its subcategories?')) return; await supabase.from('categories').delete().eq('id', id); await loadDynamicData(true); showToast('Deleted!', 'success'); renderCategoriesListAdmin(); }
-async function moveCatUp(i) { if (i === 0) return; var a = allCategories[i], b = allCategories[i - 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); await loadDynamicData(true); renderCategoriesListAdmin(); }
-async function moveCatDown(i) { if (i >= allCategories.length - 1) return; var a = allCategories[i], b = allCategories[i + 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); await loadDynamicData(true); renderCategoriesListAdmin(); }
+async function saveEditCategory(id) { var name = document.getElementById('ec-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('categories').update({ name: name, emoji: document.getElementById('ec-emoji').value.trim() }).eq('id', id); closeAdminModal(); showToast('Updated!', 'success'); renderCategoriesListAdmin(); }
+async function deleteCategory(id) { var cat = allCategories.find(function(c) { return c.id == id; }); if (!cat) return; if (!confirm('Delete "' + cat.name + '" and all its subcategories?')) return; await supabase.from('categories').delete().eq('id', id); showToast('Deleted!', 'success'); renderCategoriesListAdmin(); }
+async function moveCatUp(i) { if (i === 0) return; var a = allCategories[i], b = allCategories[i - 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); loadDynamicData(); renderCategoriesListAdmin(); }
+async function moveCatDown(i) { if (i >= allCategories.length - 1) return; var a = allCategories[i], b = allCategories[i + 1]; await supabase.from('categories').update({ sort_order: b.sort_order }).eq('id', a.id); await supabase.from('categories').update({ sort_order: a.sort_order }).eq('id', b.id); loadDynamicData(); renderCategoriesListAdmin(); }
 
 // ============ SUBCATEGORY CRUD ============
 function renderAddSubcategory(catId) { var html = '<h3>➕ Add Subcategory</h3><label>Name</label><input id="as-name" class="admin-input" placeholder="Subcategory Name"><button class="btn-primary" style="width:100%" onclick="saveNewSubcategory(\'' + catId + '\')">Save</button>'; openAdminModal(html); }
-async function saveNewSubcategory(catId) { var name = document.getElementById('as-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('subcategories').insert({ name: name, category_id: parseInt(catId), owner_email: viewingAdminEmail || currentUserEmail }); await loadDynamicData(true); closeAdminModal(); showToast('Added!', 'success'); renderSubcategoriesAdmin(catId); }
+async function saveNewSubcategory(catId) { var name = document.getElementById('as-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } await supabase.from('subcategories').insert({ name: name, category_id: parseInt(catId), owner_email: viewingAdminEmail || currentUserEmail }); closeAdminModal(); showToast('Added!', 'success'); renderSubcategoriesAdmin(catId); }
 function editSubcategory(id) { var sub = allSubcategories.find(function(s) { return s.id == id; }); if (!sub) return; var html = '<h3>✏️ Edit Subcategory</h3><label>Name</label><input id="es-name" class="admin-input" value="' + sub.name + '"><button class="btn-primary" style="width:100%" onclick="saveEditSubcategory(\'' + id + '\')">Update</button>'; openAdminModal(html); }
-async function saveEditSubcategory(id) { var name = document.getElementById('es-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').update({ name: name }).eq('id', id); await loadDynamicData(true); closeAdminModal(); showToast('Updated!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
-async function deleteSubcategory(id) { if (!confirm('Delete this subcategory and all its products?')) return; var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').delete().eq('id', id); await loadDynamicData(true); showToast('Deleted!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
+async function saveEditSubcategory(id) { var name = document.getElementById('es-name').value.trim(); if (!name) { showToast('Name required', 'error'); return; } var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').update({ name: name }).eq('id', id); closeAdminModal(); showToast('Updated!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
+async function deleteSubcategory(id) { if (!confirm('Delete this subcategory and all its products?')) return; var sub = allSubcategories.find(function(s) { return s.id == id; }); await supabase.from('subcategories').delete().eq('id', id); showToast('Deleted!', 'success'); renderSubcategoriesAdmin(sub.category_id); }
 
 // ============ EMAIL CENTER ============
 function renderEmailCenter() {
@@ -1944,11 +1772,6 @@ window.freezeAdmin = freezeAdmin; window.unfreezeAdmin = unfreezeAdmin; window.d
 window.renderSettings = renderSettings; window.saveAdminSettings = saveAdminSettings; window.saveCEOSettings = saveCEOSettings;
 window.saveAnnouncement = saveAnnouncement;
 window.renderAllProductsAdmin = renderAllProductsAdmin;
-window.toggleAllProducts = toggleAllProducts;
-window.updateBulkSelectUI = updateBulkSelectUI;
-window.bulkDeleteProducts = bulkDeleteProducts;
-window.bulkSetFeatured = bulkSetFeatured;
-window.bulkSetFeaturedOrder = bulkSetFeaturedOrder;
 window.renderCategoriesListAdmin = renderCategoriesListAdmin;
 window.renderSubcategoriesAdmin = renderSubcategoriesAdmin;
 window.renderSubProductsAdmin = renderSubProductsAdmin;
