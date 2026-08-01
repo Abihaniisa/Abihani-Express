@@ -65,7 +65,8 @@ CREATE TABLE subcategories (
 CREATE TABLE products (
     id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL,
-    price INTEGER NOT NULL,
+    price TEXT NOT NULL DEFAULT 'Ask on WhatsApp',
+    price_numeric INTEGER DEFAULT NULL,
     category_id BIGINT REFERENCES categories(id) ON DELETE SET NULL,
     subcategory_id BIGINT REFERENCES subcategories(id) ON DELETE SET NULL,
     description TEXT DEFAULT '',
