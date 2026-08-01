@@ -678,11 +678,11 @@ function updateFeaturedProducts() {
         return;
     }
 
-    // Determine how many products fit per slide based on the container width
-    var visiblePerSlide = determineVisiblePerSlide();
+    // Determine how many products fit per slide
+    var perSlide = determineVisiblePerSlide();
 
-    // Create balanced groups
-    var groups = createBalancedGroups(featured, visiblePerSlide);
+    // Create perfectly balanced groups with NO BLANK SLIDES
+    var groups = createPerfectGroups(featured, perSlide);
 
     var totalGroups = groups.length;
     if (totalGroups === 0) {
@@ -711,18 +711,42 @@ function updateFeaturedProducts() {
     html += '</div>';
     container.innerHTML = html;
 
-    // Setup carousel only if more than one group
-    if (totalGroups > 1) {
-        var track = document.getElementById('featured-carousel-track');
+    // Setup carousel
+    var track = document.getElementById('featured-carousel-track');
+    if (!track) return;
 
-        // Set up the track and slides
-        track.style.width = (totalGroups * 100) + '%';
-        var slides = track.querySelectorAll('.featured-carousel-slide');
-        for (var i = 0; i < slides.length; i++) {
-            slides[i].style.width = (100 / totalGroups) + '%';
+    // IMPORTANT: Force the track to use flex row (horizontal)
+    track.style.display = 'flex';
+    track.style.flexDirection = 'row';
+    track.style.flexWrap = 'nowrap';
+    track.style.width = (totalGroups * 100) + '%';
+    track.style.transition = 'transform 0.5s ease';
+
+    var slides = track.querySelectorAll('.featured-carousel-slide');
+    for (var i = 0; i < slides.length; i++) {
+        // Each slide takes equal width and displays cards horizontally
+        slides[i].style.display = 'flex';
+        slides[i].style.flexDirection = 'row';
+        slides[i].style.flexWrap = 'nowrap';
+        slides[i].style.flexShrink = '0';
+        slides[i].style.width = (100 / totalGroups) + '%';
+        slides[i].style.gap = '14px';
+        slides[i].style.padding = '0 4px';
+        slides[i].style.justifyContent = 'center';
+        slides[i].style.alignItems = 'stretch';
+
+        // Each product card inside the slide should flex properly
+        var cards = slides[i].querySelectorAll('.product-card');
+        var cardWidth = 100 / cards.length;
+        for (var c = 0; c < cards.length; c++) {
+            cards[c].style.flex = '0 0 ' + cardWidth + '%';
+            cards[c].style.maxWidth = cardWidth + '%';
+            cards[c].style.minWidth = '120px';
         }
+    }
 
-        // Create dots
+    // Create dots if more than one group
+    if (totalGroups > 1) {
         var dotsContainer = document.getElementById('featured-carousel-dots');
         if (dotsContainer) {
             dotsContainer.innerHTML = '';
@@ -733,45 +757,47 @@ function updateFeaturedProducts() {
                 dotsContainer.appendChild(dot);
             }
         }
+    }
 
-        // Store carousel data
-        featuredCarouselData = {
-            track: track,
-            totalGroups: totalGroups,
-            currentIndex: 0,
-            isPaused: false,
-            visiblePerSlide: visiblePerSlide,
-            groups: groups
-        };
+    // Store carousel data
+    featuredCarouselData = {
+        track: track,
+        totalGroups: totalGroups,
+        currentIndex: 0,
+        isPaused: false,
+        perSlide: perSlide,
+        groups: groups,
+        slides: slides
+    };
 
-        // Event listeners for pause/resume
-        var carouselContainer = container.querySelector('.featured-carousel');
-        if (carouselContainer) {
-            carouselContainer.addEventListener('mouseenter', pauseFeaturedCarousel);
-            carouselContainer.addEventListener('mouseleave', resumeFeaturedCarousel);
-            carouselContainer.addEventListener('touchstart', function(e) {
-                pauseFeaturedCarousel();
-                // Store touch start position to detect swipe
-                var touch = e.touches[0];
-                var startX = touch.clientX;
-                var startY = touch.clientY;
-                var handleTouchEnd = function(ev) {
-                    var endX = ev.changedTouches[0].clientX;
-                    var endY = ev.changedTouches[0].clientY;
-                    var dx = startX - endX;
-                    var dy = startY - endY;
-                    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 30) {
-                        if (dx > 0) moveFeaturedCarousel(1);
-                        else moveFeaturedCarousel(-1);
-                    }
-                    document.removeEventListener('touchend', handleTouchEnd);
-                    setTimeout(resumeFeaturedCarousel, 10000);
-                };
-                document.addEventListener('touchend', handleTouchEnd);
-            });
-        }
+    // Event listeners for pause/resume
+    var carouselContainer = container.querySelector('.featured-carousel');
+    if (carouselContainer) {
+        carouselContainer.addEventListener('mouseenter', pauseFeaturedCarousel);
+        carouselContainer.addEventListener('mouseleave', resumeFeaturedCarousel);
+        carouselContainer.addEventListener('touchstart', function(e) {
+            pauseFeaturedCarousel();
+            var touch = e.touches[0];
+            var startX = touch.clientX;
+            var startY = touch.clientY;
+            var handleTouchEnd = function(ev) {
+                var endX = ev.changedTouches[0].clientX;
+                var endY = ev.changedTouches[0].clientY;
+                var dx = startX - endX;
+                var dy = startY - endY;
+                if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 30) {
+                    if (dx > 0) moveFeaturedCarousel(1);
+                    else moveFeaturedCarousel(-1);
+                }
+                document.removeEventListener('touchend', handleTouchEnd);
+                setTimeout(resumeFeaturedCarousel, 10000);
+            };
+            document.addEventListener('touchend', handleTouchEnd);
+        });
+    }
 
-        // Start autoplay
+    // Start autoplay if more than one group
+    if (totalGroups > 1) {
         featuredCarouselInterval = setInterval(function() {
             moveFeaturedCarousel(1);
         }, CONFIG.FEATURED_CAROUSEL_INTERVAL || 5000);
@@ -779,15 +805,13 @@ function updateFeaturedProducts() {
 }
 
 function determineVisiblePerSlide() {
-    // Determine how many products fit per slide based on layout
-    // Check if there's an existing carousel or use defaults
     var container = document.getElementById('featured-products');
     if (!container) return CONFIG.FEATURED_CAROUSEL_VISIBLE || 3;
 
     var width = container.offsetWidth;
     if (width === 0) return CONFIG.FEATURED_CAROUSEL_VISIBLE || 3;
 
-    // Each product card in the carousel has a minimum width
+    // Each product card needs minimum width
     // On mobile: ~150px, on desktop: ~200px
     var cardWidth = width < 768 ? 150 : 200;
     var cardGap = 14;
@@ -797,64 +821,59 @@ function determineVisiblePerSlide() {
 
     // Clamp to reasonable bounds
     var minVisible = 1;
-    var maxAllowed = 4;
+    var maxAllowed = 5;
     var visible = Math.max(minVisible, Math.min(maxAllowed, maxVisible));
 
     return visible;
 }
 
-function createBalancedGroups(products, perGroup) {
+function createPerfectGroups(products, perSlide) {
     var total = products.length;
-    var groups = [];
 
-    if (total <= perGroup) {
-        // All products fit in one group
-        groups.push(products.slice());
-        return groups;
+    // If total is 0, return empty array
+    if (total === 0) return [];
+
+    // If total <= perSlide, all products go in one group
+    if (total <= perSlide) {
+        return [products.slice()];
     }
 
-    // Calculate optimal group count
-    var numGroups = Math.ceil(total / perGroup);
+    // Calculate optimal number of groups
+    // We want to minimize the number of groups while keeping them balanced
+    var numGroups = Math.ceil(total / perSlide);
 
-    // Distribute products evenly across groups
-    var baseSize = Math.floor(total / numGroups);
-    var remainder = total % numGroups;
+    // Ensure we don't create more groups than products
+    if (numGroups > total) numGroups = total;
 
+    // Calculate the ideal group size
+    var idealSize = Math.ceil(total / numGroups);
+
+    // Create groups with the ideal size
+    var groups = [];
+    var remaining = total;
     var start = 0;
-    for (var i = 0; i < numGroups; i++) {
-        var size = baseSize + (i < remainder ? 1 : 0);
+
+    while (remaining > 0) {
+        // For the last group, take all remaining products
+        // For other groups, take the ideal size
+        var size = (remaining <= idealSize) ? remaining : idealSize;
+
+        // But ensure we don't leave too few for the last group
+        // If the remaining products after this group would be 1, and there are other groups after,
+        // adjust to make the last group more balanced
+        var remainingAfter = remaining - size;
+        if (remainingAfter > 0 && remainingAfter < idealSize / 2) {
+            // Move some products to the last group to balance
+            var adjust = Math.min(idealSize / 2 - remainingAfter, size - 1);
+            if (adjust > 0) {
+                size = size - adjust;
+            }
+        }
+
         var group = products.slice(start, start + size);
         groups.push(group);
         start += size;
-    }
-
-    // Special case: if the last group has only 1 product and there are more than 2 groups,
-    // redistribute to make the last group more balanced
-    if (groups.length >= 2) {
-        var lastIdx = groups.length - 1;
-        var lastGroup = groups[lastIdx];
-        var prevGroup = groups[lastIdx - 1];
-
-        // If last group has only 1 product and previous group has at least 2
-        if (lastGroup.length === 1 && prevGroup.length >= 2) {
-            // Move the last product to the previous group if it would be balanced
-            // OR move one from previous to last
-            // Better: merge last two groups if total fits in perGroup
-            var combined = prevGroup.concat(lastGroup);
-            if (combined.length <= perGroup * 1.5) {
-                // Replace last two groups with a balanced split
-                var halfCombined = Math.floor(combined.length / 2);
-                var newPrev = combined.slice(0, halfCombined + (combined.length % 2));
-                var newLast = combined.slice(halfCombined + (combined.length % 2));
-                groups[lastIdx - 1] = newPrev;
-                groups[lastIdx] = newLast;
-            } else {
-                // Move last product to previous group
-                var moved = prevGroup.concat(lastGroup);
-                groups[lastIdx - 1] = moved;
-                groups.pop();
-            }
-        }
+        remaining -= size;
     }
 
     // Final check: ensure no group is empty
@@ -908,7 +927,6 @@ function pauseFeaturedCarousel() {
         featuredCarouselInterval = null;
     }
 
-    // Clear any pending resume timer
     if (featuredCarouselResumeTimer) {
         clearTimeout(featuredCarouselResumeTimer);
         featuredCarouselResumeTimer = null;
@@ -919,16 +937,13 @@ function resumeFeaturedCarousel() {
     var data = featuredCarouselData;
     if (!data) return;
 
-    // If already playing, do nothing
     if (!data.isPaused && featuredCarouselInterval) return;
 
-    // Clear any pending timers
     if (featuredCarouselResumeTimer) {
         clearTimeout(featuredCarouselResumeTimer);
         featuredCarouselResumeTimer = null;
     }
 
-    // Schedule resume after delay
     featuredCarouselResumeTimer = setTimeout(function() {
         var dataCheck = featuredCarouselData;
         if (!dataCheck) return;
