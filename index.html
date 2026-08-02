@@ -28,8 +28,14 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Abihani Express">
-    <link rel="icon" type="image/png" sizes="192x192" href="https:https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/abihanilogo.png">
-    <link rel="apple-touch-icon" href="https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/logo.png">
+    
+    <!-- ✅ FIXED: Correct new PNG favicon with Cache-Buster (?v=1) to force immediate update -->
+    <link rel="icon" type="image/png" sizes="192x192" href="https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/abihanilogo.png?v=1">
+    <!-- ✅ ADDED: Guarantees Google Search picks it up -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=1">
+    <!-- ✅ FIXED: Updated Apple Touch Icon to match -->
+    <link rel="apple-touch-icon" href="https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/abihanilogo.png?v=1">
+    
     <script type="application/ld+json">
     {"@context":"https://schema.org","@type":"Organization","name":"Abihani Express","url":"https://www.abihaniexpress.com.ng","logo":"https://hibpuvurlvkuqjawkqlu.supabase.co/storage/v1/object/public/images/logo.png","description":"Premium handcrafted leather goods from Yobe State, Nigeria.","contactPoint":{"@type":"ContactPoint","telephone":"+2347067551684","contactType":"customer service","areaServed":"NG"},"sameAs":["https://www.facebook.com/Abihaniisa","https://www.instagram.com/abihani_isa","https://x.com/abihaniisa01"]}
     </script>
